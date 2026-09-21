@@ -172,6 +172,7 @@ function orderSvg() {
 function issueDetail(i, n) {
   const pr = prFor(i);
   const lane = lanes.get(i.id);
+  const prev = buildOrder[n - 2], next = buildOrder[n];
   const metaKeys = Object.keys(i.meta).filter(k => k.startsWith('execution_'));
   const field = (label, body) => body ? `<div class="field"><div class="flabel">${label}</div><div class="fbody">${body}</div></div>` : `<div class="field"><div class="flabel">${label}</div><div class="fbody muted">not written yet</div></div>`;
   return `<article class="issue lane-${lane}" id="${anchor(i.id)}">
@@ -201,8 +202,21 @@ function issueDetail(i, n) {
         <div class="field"><div class="flabel">Record</div><div class="fbody small"><div>owner ${esc(i.assignee || i.owner || '—')}</div><div>created ${esc(String(i.created_at || '').slice(0, 10))}</div><div>updated ${esc(String(i.updated_at || '').slice(0, 10))}</div><div>level ${level.get(i.id)} in build order</div></div></div>
       </aside>
     </div>
-    <div class="ifoot"><a href="#board">↑ Board</a> · <a href="#order">Build order</a></div>
+    <div class="ifoot">
+      <span>${prev ? `<a href="#${anchor(prev.id)}">← ${esc(prev.id)}</a>` : ''}</span>
+      <span><a href="#issues">All issues</a> · <a href="#board">Board</a> · <a href="#order">Build order</a></span>
+      <span>${next ? `<a href="#${anchor(next.id)}">${esc(next.id)} →</a>` : ''}</span>
+    </div>
   </article>`;
+}
+
+function issueRow(i, n) {
+  const lane = lanes.get(i.id);
+  return `<a class="irow lane-${lane}" href="#${anchor(i.id)}">
+    <span class="n">${n}</span><span class="prio ${prioOf(i)}">${prioOf(i)}</span><code>${esc(i.id)}</code>
+    <span class="t">${esc(i.title)}</span>
+    <span class="pill pill-${lane}">${esc(LANE_LABEL[lane])}</span><span class="m">${esc(milestoneOf(i))}</span>
+  </a>`;
 }
 
 const generated = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
@@ -301,10 +315,15 @@ section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin:12px 0 0;font-size:12px;color:var(--ink-2)}
 .legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--queued)}
 .legend .r::before{background:var(--heat)} .legend .p::before{background:var(--progress)} .legend .v::before{background:var(--review)} .legend .d::before{background:var(--ok)}
-.issues-list{display:grid;gap:18px}
-.issue{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px 22px 14px;scroll-margin-top:16px;border-top:3px solid var(--queued)}
+.idx li a.active{background:var(--panel-2);color:var(--ink)} .idx ol.issues li a.active code{color:var(--heat)}
+.irows{display:grid;border-top:1px solid var(--line)}
+.irow{display:grid;grid-template-columns:28px 34px 62px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 6px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;font-size:13px;border-left:3px solid var(--queued);padding-left:9px}
+.irow:hover{background:var(--panel)} .irow .n{font-family:var(--mono);font-size:11px;color:var(--ink-3)} .irow code{color:var(--ink-3);font-size:11px}
+.irow .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500} .irow .m{font-size:11px;color:var(--ink-3);white-space:nowrap}
+.irow.lane-ready{border-left-color:var(--heat)} .irow.lane-progress{border-left-color:var(--progress)} .irow.lane-review{border-left-color:var(--review)} .irow.lane-done{border-left-color:var(--ok);color:var(--ink-3)}
+.issue{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px 22px 14px;border-top:3px solid var(--queued)}
 .issue.lane-ready{border-top-color:var(--heat)} .issue.lane-progress{border-top-color:var(--progress)} .issue.lane-review{border-top-color:var(--review)} .issue.lane-done{border-top-color:var(--ok)}
-.issue:target{box-shadow:0 0 0 3px var(--heat-soft),0 0 0 4px var(--heat)}
+.ifoot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .ihead{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px;font-size:12px}
 .ihead .n{font-family:var(--mono);color:var(--ink-3)}
 .ihead .type,.ms-tag{color:var(--ink-3)}
@@ -322,8 +341,9 @@ section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
 .ilink{display:inline-flex;gap:6px;align-items:baseline;color:var(--ink);text-decoration:none;font-size:12px;line-height:1.6}
 .ilink code{color:var(--ink-3)} .ilink:hover{color:var(--heat)} .ilink.closed{color:var(--ink-3);text-decoration:line-through}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:0;font-size:12px} .kv dt{color:var(--ink-3)} .kv dd{margin:0;font-family:var(--mono)}
-.ifoot{margin-top:8px;font-size:12px}
-.ifoot a{color:var(--ink-3);text-decoration:none} .ifoot a:hover{color:var(--heat)}
+.ifoot{margin-top:14px;padding-top:10px;border-top:1px solid var(--line);font-size:12px}
+.ifoot a{color:var(--ink-2);text-decoration:none} .ifoot a:hover{color:var(--heat)}
+@media (max-width:700px){.irow{grid-template-columns:28px 34px minmax(0,1fr);grid-auto-rows:auto}.irow code,.irow .m{display:none}}
 .log{list-style:none;padding:0;margin:0;display:grid;gap:0;border-top:1px solid var(--line)}
 .log li{display:grid;grid-template-columns:130px minmax(0,1fr);gap:16px;padding:12px 0;border-bottom:1px solid var(--line)}
 .log time{font-family:var(--mono);font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums}
@@ -355,31 +375,34 @@ section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
     </div>
   </nav>
   <main>
-    <section id="status" class="part" style="margin-top:0">
+    <section id="status" class="part view">
       <div class="eyebrow">Beads · prefix fe · embedded store</div>
       <h2>Where the build stands</h2>
-      <p class="lead">One card per beads issue, seeded from the Fire Enrich PRD. A card moves right as it is claimed, opened as a pull request into <code>develop</code>, and closed. Every id on this page links to the issue's own entry in section 4.</p>
+      <p class="lead">One card per beads issue, seeded from the Fire Enrich PRD. A card moves right as it is claimed, opened as a pull request into <code>develop</code>, and closed. Every id on this page opens the issue's own view.</p>
       <div class="summary">
         ${LANES.map(([k, label, hint]) => `<div class="tile ${k}"><div class="n">${counts[k]}</div><div class="l">${label}</div><div class="h">${hint}</div></div>`).join('')}
       </div>
     </section>
-    <section id="board" class="part">
+    <section id="board" class="part view" hidden>
       <h2>Board</h2>
       <p class="lead">Grouped by milestone in delivery order. P0 is critical. Queued cards wait on the issues named in their footer.</p>
       ${MILESTONES.map(milestoneSection).join('')}
     </section>
-    <section id="order" class="part">
+    <section id="order" class="part view" hidden>
       <h2>Build order</h2>
-      <p class="lead">Dependencies flow left to right. An issue becomes ready when every box pointing into it is done. Click a box to open its entry. Scroll sideways for the later levels.</p>
+      <p class="lead">Dependencies flow left to right. An issue becomes ready when every box pointing into it is done. Click a box to open the issue. Scroll sideways for the later levels.</p>
       <div class="order">${orderSvg()}</div>
       <div class="legend"><span class="r">ready</span><span class="p">in progress</span><span class="v">in review</span><span class="d">done</span><span>queued</span></div>
     </section>
-    <section id="issues" class="part">
-      <h2>Issues</h2>
-      <p class="lead">Every issue in build order, with its full record: description, design, acceptance, notes, execution metadata, and the links to what blocks it and what it unblocks. Fields marked "not written yet" fill in as the enrichment pass lands.</p>
-      <div class="issues-list">${buildOrder.map((i, n) => issueDetail(i, n + 1)).join('')}</div>
+    <section id="issues" class="part view" hidden>
+      <div id="issues-list">
+        <h2>Issues</h2>
+        <p class="lead">Every issue in build order. Open one to see its full record: description, design, acceptance, notes, execution metadata, and what it blocks and is blocked by. Fields marked "not written yet" fill in as the enrichment pass lands.</p>
+        <div class="irows">${buildOrder.map((i, n) => issueRow(i, n + 1)).join('')}</div>
+      </div>
+      <div class="issues-detail">${buildOrder.map((i, n) => issueDetail(i, n + 1)).join('')}</div>
     </section>
-    <section id="log" class="part">
+    <section id="log" class="part view" hidden>
       <h2>Check-ins</h2>
       <p class="lead">One line per check-in: what closed, what opened, what changed in the plan.</p>
       <ul class="log">${log.length ? log.map(e => `<li><time>${esc(e.at)}</time><div>${esc(e.note)}</div></li>`).join('') : '<li><time>—</time><div>No check-ins logged yet.</div></li>'}</ul>
@@ -387,6 +410,33 @@ section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
     <p class="foot">Repository ${esc(originUrl.replace(/\.git$/, ''))} · Generated by <code>scripts/board.mjs</code> from <code>bd export</code> and <code>gh pr list</code>.</p>
   </main>
 </div>
+<script>
+(function () {
+  var views = Array.prototype.slice.call(document.querySelectorAll('.view'));
+  var list = document.getElementById('issues-list');
+  var articles = Array.prototype.slice.call(document.querySelectorAll('.issue'));
+  var links = Array.prototype.slice.call(document.querySelectorAll('.idx a'));
+  function route() {
+    var h = (location.hash || '#status').slice(1);
+    var issue = h.indexOf('issue-') === 0 ? h : null;
+    var view = issue ? 'issues' : h;
+    if (!document.getElementById(view)) { view = 'status'; issue = null; }
+    views.forEach(function (v) { v.hidden = v.id !== view; });
+    list.hidden = !!issue;
+    articles.forEach(function (a) { a.hidden = a.id !== issue; });
+    links.forEach(function (a) {
+      var href = a.getAttribute('href');
+      a.classList.toggle('active', href === '#' + h || (issue === null && href === '#' + view && !a.closest('.issues')));
+    });
+    var active = document.querySelector('.idx a.active');
+    if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+    window.scrollTo(0, 0);
+    document.title = (issue ? issue.replace('issue-', '') + ' · ' : '') + 'Fire Enrich Board';
+  }
+  window.addEventListener('hashchange', route);
+  route();
+})();
+</script>
 `;
 writeFileSync(resolve(OUT, 'index.html'), html);
 console.log(`board/index.html written: ${issues.length} issues, ${prs.length} PRs, ${linkCount} links, ${log.length} log entries; lanes ${JSON.stringify(counts)}`);
