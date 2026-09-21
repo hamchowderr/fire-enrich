@@ -131,10 +131,19 @@ function milestoneSection(ms) {
     const inLane = items.filter(i => lanes.get(i.id) === k).sort((a, b) => (a.priority - b.priority) || (level.get(a.id) - level.get(b.id)));
     return `<div class="col"><div class="colhead"><span>${label}</span><span class="n">${inLane.length}</span></div>${inLane.map(card).join('') || '<div class="empty">none</div>'}</div>`;
   }).join('');
-  return `<section class="ms" id="ms-${ms.toLowerCase().replace(/[^a-z0-9]+/g, '-')}">
+  return `<section class="ms" id="board-${slug(ms)}" data-ms="${slug(ms)}" hidden>
     <div class="mshead"><h3>${esc(ms)}</h3><span class="progress"><span style="width:${Math.round(done / items.length * 100)}%"></span></span><span class="n">${done} / ${items.length} done</span></div>
     <div class="board">${cols}</div>
   </section>`;
+}
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+const activeMilestones = MILESTONES.filter(m => issues.some(i => milestoneOf(i) === m));
+function boardTabs() {
+  return `<div class="tabs" role="tablist" aria-label="Milestone boards">${activeMilestones.map(ms => {
+    const items = issues.filter(i => milestoneOf(i) === ms);
+    const done = items.filter(i => lanes.get(i.id) === 'done').length;
+    return `<a role="tab" class="tab" data-ms="${slug(ms)}" href="#board-${slug(ms)}">${esc(ms)} <span class="k">${done}/${items.length}</span></a>`;
+  }).join('')}</div>`;
 }
 
 function orderSvg() {
@@ -204,7 +213,7 @@ function issueDetail(i, n) {
     </div>
     <div class="ifoot">
       <span>${prev ? `<a href="#${anchor(prev.id)}">← ${esc(prev.id)}</a>` : ''}</span>
-      <span><a href="#issues">All issues</a> · <a href="#board">Board</a> · <a href="#order">Build order</a></span>
+      <span><a href="#issues">All issues and build order</a> · <a href="#board">Board</a></span>
       <span>${next ? `<a href="#${anchor(next.id)}">${esc(next.id)} →</a>` : ''}</span>
     </div>
   </article>`;
@@ -276,7 +285,12 @@ main{padding:44px 44px 120px;max-width:1400px;min-width:0}
 section.part{margin-top:56px}
 section.part>h2{font-size:22px;font-weight:700;letter-spacing:-.01em;margin-bottom:6px}
 section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
-.ms{margin-top:30px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px}
+.tab{display:inline-flex;align-items:baseline;gap:8px;padding:7px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);text-decoration:none;font-size:13px;font-weight:500}
+.tab .k{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.tab:hover{border-color:var(--ink-3)} .tab.active{background:var(--ink);color:var(--ground);border-color:var(--ink)} .tab.active .k{color:var(--ground);opacity:.75}
+.order{margin-bottom:6px}
+.ms{margin-top:24px}
 .mshead{display:flex;align-items:center;gap:14px;margin-bottom:12px}
 .mshead h3{font-size:15px;font-weight:600}
 .mshead .n{font-family:var(--mono);font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
@@ -359,12 +373,13 @@ section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
     <div class="sub">${esc(ownerRepo || 'fire-enrich')} · <code>${esc(branch)}</code></div>
     <ol>
       <li><a href="#status"><span>1 · Status</span><span class="k">${issues.length}</span></a></li>
-      <li><a href="#board"><span>2 · Board</span><span class="k">${MILESTONES.filter(m => issues.some(i => milestoneOf(i) === m)).length} milestones</span></a></li>
-      <li><a href="#order"><span>3 · Build order</span><span class="k">${linkCount} links</span></a></li>
-      <li><a href="#issues"><span>4 · Issues</span><span class="k">${issues.length}</span></a>
+      <li><a href="#board"><span>2 · Board</span><span class="k">${activeMilestones.length} milestones</span></a>
+        <ol class="issues">${activeMilestones.map(ms => `<li><a href="#board-${slug(ms)}"><code>board</code><span class="t">${esc(ms)}</span></a></li>`).join('')}</ol>
+      </li>
+      <li><a href="#issues"><span>3 · Issues and build order</span><span class="k">${issues.length} · ${linkCount} links</span></a>
         <ol class="issues">${buildOrder.map(i => `<li class="lane-${lanes.get(i.id)}"><a href="#${anchor(i.id)}"><code>${esc(i.id)}</code><span class="t">${esc(i.title)}</span></a></li>`).join('')}</ol>
       </li>
-      <li><a href="#log"><span>5 · Check-ins</span><span class="k">${log.length}</span></a></li>
+      <li><a href="#log"><span>4 · Check-ins</span><span class="k">${log.length}</span></a></li>
     </ol>
     <div class="stat">
       <div>Ready now <b>${counts.ready}</b></div>
@@ -385,19 +400,16 @@ section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
     </section>
     <section id="board" class="part view" hidden>
       <h2>Board</h2>
-      <p class="lead">Grouped by milestone in delivery order. P0 is critical. Queued cards wait on the issues named in their footer.</p>
-      ${MILESTONES.map(milestoneSection).join('')}
-    </section>
-    <section id="order" class="part view" hidden>
-      <h2>Build order</h2>
-      <p class="lead">Dependencies flow left to right. An issue becomes ready when every box pointing into it is done. Click a box to open the issue. Scroll sideways for the later levels.</p>
-      <div class="order">${orderSvg()}</div>
-      <div class="legend"><span class="r">ready</span><span class="p">in progress</span><span class="v">in review</span><span class="d">done</span><span>queued</span></div>
+      <p class="lead">One board per milestone. P0 is critical. Queued cards wait on the issues named in their footer.</p>
+      ${boardTabs()}
+      <div id="boards">${MILESTONES.map(milestoneSection).join('')}</div>
     </section>
     <section id="issues" class="part view" hidden>
       <div id="issues-list">
-        <h2>Issues</h2>
-        <p class="lead">Every issue in build order. Open one to see its full record: description, design, acceptance, notes, execution metadata, and what it blocks and is blocked by. Fields marked "not written yet" fill in as the enrichment pass lands.</p>
+        <h2>Issues and build order</h2>
+        <p class="lead">Dependencies flow left to right; an issue becomes ready when every box pointing into it is done. Click any box or row to open the issue's full record: description, design, acceptance, notes, execution metadata, and what it blocks and is blocked by. Scroll the diagram sideways for later levels.</p>
+        <div class="order">${orderSvg()}</div>
+        <div class="legend"><span class="r">ready</span><span class="p">in progress</span><span class="v">in review</span><span class="d">done</span><span>queued</span></div>
         <div class="irows">${buildOrder.map((i, n) => issueRow(i, n + 1)).join('')}</div>
       </div>
       <div class="issues-detail">${buildOrder.map((i, n) => issueDetail(i, n + 1)).join('')}</div>
@@ -416,17 +428,27 @@ section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
   var list = document.getElementById('issues-list');
   var articles = Array.prototype.slice.call(document.querySelectorAll('.issue'));
   var links = Array.prototype.slice.call(document.querySelectorAll('.idx a'));
+  var boards = Array.prototype.slice.call(document.querySelectorAll('#boards .ms'));
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tabs .tab'));
+  var firstMs = boards.length ? boards[0].getAttribute('data-ms') : '';
   function route() {
     var h = (location.hash || '#status').slice(1);
     var issue = h.indexOf('issue-') === 0 ? h : null;
-    var view = issue ? 'issues' : h;
-    if (!document.getElementById(view)) { view = 'status'; issue = null; }
+    var ms = h.indexOf('board-') === 0 ? h.slice(6) : (h === 'board' ? firstMs : null);
+    var view = issue ? 'issues' : (ms !== null ? 'board' : h);
+    if (!document.getElementById(view)) { view = 'status'; issue = null; ms = null; }
     views.forEach(function (v) { v.hidden = v.id !== view; });
     list.hidden = !!issue;
     articles.forEach(function (a) { a.hidden = a.id !== issue; });
+    if (ms !== null) {
+      if (!boards.some(function (b) { return b.getAttribute('data-ms') === ms; })) ms = firstMs;
+      boards.forEach(function (b) { b.hidden = b.getAttribute('data-ms') !== ms; });
+      tabs.forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-ms') === ms); t.setAttribute('aria-selected', t.getAttribute('data-ms') === ms ? 'true' : 'false'); });
+    }
     links.forEach(function (a) {
       var href = a.getAttribute('href');
-      a.classList.toggle('active', href === '#' + h || (issue === null && href === '#' + view && !a.closest('.issues')));
+      var on = href === '#' + h || (issue === null && ms === null && href === '#' + view && !a.closest('.issues')) || (ms !== null && href === '#board-' + ms) || (ms !== null && href === '#board' && !a.closest('.issues'));
+      a.classList.toggle('active', on);
     });
     var active = document.querySelector('.idx a.active');
     if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
