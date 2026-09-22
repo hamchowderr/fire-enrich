@@ -140,6 +140,18 @@ function errorMessage(error: unknown): string {
   return (error as { message?: string })?.message ?? '';
 }
 
+/**
+ * Whether the API refused the call for rate limiting.
+ *
+ * The one failure that is safe to retry on a call that is not idempotent: a
+ * 429 means the request was turned away before any work started, while a 502,
+ * 503 or 504 from the gateway says nothing about whether the upstream did the
+ * work anyway.
+ */
+export function isRateLimited(error: unknown): boolean {
+  return errorStatus(error) === 429;
+}
+
 /** Whether another attempt could plausibly succeed. */
 function isRetryable(error: unknown): boolean {
   const status = errorStatus(error);
@@ -172,6 +184,12 @@ export interface RetryOptions {
   signal?: AbortSignal;
   /** Short label used in the retry warning, e.g. `search "acme pricing"`. */
   label: string;
+  /**
+   * Which failures earn another attempt. Defaults to the transient statuses and
+   * transport errors above; a non-idempotent call narrows it to
+   * {@link isRateLimited} so a retry can never start the work twice.
+   */
+  retryIf?: (error: unknown) => boolean;
 }
 
 /**
@@ -185,7 +203,7 @@ export interface RetryOptions {
  */
 export async function withFirecrawlRetry<T>(
   operation: (attempt: number) => Promise<T>,
-  { signal, label }: RetryOptions
+  { signal, label, retryIf = isRetryable }: RetryOptions
 ): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     signal?.throwIfAborted();
@@ -194,7 +212,7 @@ export async function withFirecrawlRetry<T>(
       return await raceAbort(operation(attempt), signal);
     } catch (error) {
       if (signal?.aborted) throw error;
-      if (!isRetryable(error) || attempt >= MAX_ATTEMPTS - 1) throw error;
+      if (!retryIf(error) || attempt >= MAX_ATTEMPTS - 1) throw error;
 
       const wait = BASE_DELAY_MS * 2 ** attempt;
       console.warn(

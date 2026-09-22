@@ -29,18 +29,57 @@
  * serverless deployment at all. `scope: 'shared'` gives the whole process one
  * session instead of one per thread: a session is a billed sandbox, and
  * enrichment drives a handful of pages in sequence rather than many at once.
- * `@mastra/browser-firecrawl` reads `FIRECRAWL_API_KEY` from the environment
- * and throws at construction when it is missing, which is deliberate — a
- * process that cannot reach Firecrawl cannot enrich anything, so it should fail
- * at boot rather than on the first row.
+ *
+ * ## Why the browser is built lazily
+ *
+ * `@mastra/browser-firecrawl` reads `FIRECRAWL_API_KEY` when a `FirecrawlBrowser`
+ * is constructed and throws when it is missing. Built at module load, that
+ * throw takes down every process that merely imports the Mastra instance: a
+ * keyless `next build` dies at "Collecting page data", and a keyless
+ * `mastra dev` never boots. Neither of them drives a browser.
+ *
+ * `Agent.browser` only accepts an instance, not a factory, so
+ * {@link lazyFirecrawlBrowser} hands the agent a stand-in that builds the real
+ * browser on the first property the agent reads from it, which is the first
+ * time a run actually needs it. The key is read then, and a missing key fails
+ * that run with the SDK's own message instead of failing the whole process.
+ * The one property answered without building is `providerType`, which the
+ * `Agent` constructor checks to reject CLI providers.
  */
-import { FirecrawlBrowser } from '@mastra/browser-firecrawl';
+import { FirecrawlBrowser, type FirecrawlBrowserConfig } from '@mastra/browser-firecrawl';
 import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
 
 import { resolveModel } from '../models';
 import { scrapeTool } from '../tools/firecrawl';
 import { BLOCKED_DOMAINS_LABEL } from '../tools/filters';
+
+/** A `FirecrawlBrowser` that is constructed on first use rather than now. */
+function lazyFirecrawlBrowser(config: FirecrawlBrowserConfig): FirecrawlBrowser {
+  let real: FirecrawlBrowser | undefined;
+  const instance = (): FirecrawlBrowser => (real ??= new FirecrawlBrowser(config));
+
+  // The target only carries the prototype, so `instanceof FirecrawlBrowser`
+  // holds before anything is built. Every read, write and `in` check is
+  // forwarded to the real browser, with methods bound to it so their `this`
+  // and private state are the real ones, not the proxy's.
+  return new Proxy(Object.create(FirecrawlBrowser.prototype) as FirecrawlBrowser, {
+    get(_target, property) {
+      if (property === 'providerType') return 'sdk';
+
+      const target = instance();
+      const value: unknown = Reflect.get(target, property, target);
+
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+    set(_target, property, value) {
+      return Reflect.set(instance(), property, value);
+    },
+    has(_target, property) {
+      return Reflect.has(instance(), property);
+    },
+  });
+}
 
 export const browserAgent = new Agent({
   id: 'browser',
@@ -67,7 +106,7 @@ export const browserAgent = new Agent({
     '- An honest unknown is worth more than a value obtained by getting around a control. Never guess a value to avoid reporting unknown.',
   ].join('\n'),
   model: resolveModel('research'),
-  browser: new FirecrawlBrowser({ scope: 'shared' }),
+  browser: lazyFirecrawlBrowser({ scope: 'shared' }),
   /**
    * Required, not optional, for this agent.
    *

@@ -219,6 +219,121 @@ describe('firecrawlAgentTool', () => {
     expect(cancelAgentMock).not.toHaveBeenCalled();
   });
 
+  it('does not retry the start call on a gateway error, which could start a second job', async () => {
+    startAgentMock.mockRejectedValueOnce(apiError(503, 'Unavailable'));
+
+    await expect(runTool(firecrawlAgentTool, { prompt: 'anything' })).rejects.toThrow('Unavailable');
+    expect(startAgentMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries the start call on a 429, which started nothing', async () => {
+    vi.useFakeTimers();
+    startAgentMock
+      .mockRejectedValueOnce(apiError(429, 'Too Many Requests'))
+      .mockResolvedValueOnce({ success: true, id: 'job_fixture_0001' });
+    getAgentStatusMock.mockResolvedValueOnce(agentFixture);
+
+    const pending = runTool<AgentToolInput, AgentToolOutput>(firecrawlAgentTool, {
+      prompt: 'anything',
+    });
+    await vi.runAllTimersAsync();
+
+    expect((await pending).status).toBe('completed');
+    expect(startAgentMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels the job and reports failure when status polling exhausts its retries', async () => {
+    vi.useFakeTimers();
+    getAgentStatusMock.mockRejectedValue(apiError(503, 'Unavailable'));
+
+    const pending = runTool<AgentToolInput, AgentToolOutput>(firecrawlAgentTool, {
+      prompt: 'anything',
+    });
+    await vi.runAllTimersAsync();
+    const result = await pending;
+
+    expect(getAgentStatusMock).toHaveBeenCalledTimes(3);
+    expect(cancelAgentMock).toHaveBeenCalledWith('job_fixture_0001');
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('Unavailable');
+    expect(result.error).toContain('job job_fixture_0001 was cancelled');
+  });
+
+  it('cancels the job on an error that is not retried at all', async () => {
+    getAgentStatusMock.mockRejectedValueOnce(apiError(400, 'Bad Request'));
+
+    const result = await runTool<AgentToolInput, AgentToolOutput>(firecrawlAgentTool, {
+      prompt: 'anything',
+    });
+
+    expect(getAgentStatusMock).toHaveBeenCalledTimes(1);
+    expect(cancelAgentMock).toHaveBeenCalledWith('job_fixture_0001');
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('Bad Request');
+  });
+
+  it('reports a cancel that failed instead of throwing it', async () => {
+    getAgentStatusMock.mockRejectedValueOnce(apiError(400, 'Bad Request'));
+    cancelAgentMock.mockRejectedValueOnce(new Error('cancel endpoint down'));
+
+    const result = await runTool<AgentToolInput, AgentToolOutput>(firecrawlAgentTool, {
+      prompt: 'anything',
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('Bad Request');
+    expect(result.error).toContain('cancelling job job_fixture_0001 failed: cancel endpoint down');
+  });
+
+  it('treats `cancelled` as terminal and reports it as a failure', async () => {
+    getAgentStatusMock.mockResolvedValueOnce({ success: true, status: 'cancelled', expiresAt: '' });
+
+    const result = await runTool<AgentToolInput, AgentToolOutput>(firecrawlAgentTool, {
+      prompt: 'anything',
+    });
+
+    expect(getAgentStatusMock).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('failed');
+    expect(result.error).toMatch(/cancelled/);
+    // The job ended on its own; there is nothing left to cancel.
+    expect(cancelAgentMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps polling on a status it does not recognise', async () => {
+    vi.useFakeTimers();
+    getAgentStatusMock
+      .mockResolvedValueOnce({ ...processing, status: 'queued' })
+      .mockResolvedValueOnce(agentFixture);
+
+    const pending = runTool<AgentToolInput, AgentToolOutput>(firecrawlAgentTool, {
+      prompt: 'anything',
+    });
+    await vi.runAllTimersAsync();
+
+    expect((await pending).status).toBe('completed');
+    expect(getAgentStatusMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels a run that is still going after ten minutes', async () => {
+    vi.useFakeTimers();
+    getAgentStatusMock.mockResolvedValue(processing);
+
+    const pending = runTool<AgentToolInput, AgentToolOutput>(firecrawlAgentTool, {
+      prompt: 'anything',
+    });
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000 - 3_000);
+    expect(cancelAgentMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    const result = await pending;
+
+    expect(cancelAgentMock).toHaveBeenCalledWith('job_fixture_0001');
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('did not finish within 10 minutes');
+    expect(result.error).toContain('job job_fixture_0001 was cancelled');
+  });
+
   it('writes progress for the start, each poll, and every source it found', async () => {
     vi.useFakeTimers();
     getAgentStatusMock.mockResolvedValueOnce(processing).mockResolvedValueOnce(agentFixture);

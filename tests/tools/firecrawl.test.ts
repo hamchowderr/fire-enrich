@@ -389,8 +389,15 @@ describe('mapTool', () => {
     expect(result.truncated).toBe(false);
   });
 
-  it('caps the list and says it did', async () => {
-    mapMock.mockResolvedValueOnce(mapFixture);
+  /** Behave like the API: return at most `limit` of the recorded links. */
+  function honourLimit() {
+    mapMock.mockImplementation(async (_url: string, options: { limit: number }) => ({
+      links: mapFixture.links.slice(0, options.limit),
+    }));
+  }
+
+  it('says the site may have more when the API stops at the limit', async () => {
+    honourLimit();
 
     const result = await runTool<{ url: string; limit?: number }, MapOutput>(mapTool, {
       url: 'https://firecrawl.dev',
@@ -399,6 +406,32 @@ describe('mapTool', () => {
 
     expect(mapMock).toHaveBeenCalledWith('https://firecrawl.dev', { search: undefined, limit: 3 });
     expect(result.links).toHaveLength(3);
+    expect(result.truncated).toBe(true);
+  });
+
+  it('does not claim truncation when the site has fewer urls than the limit', async () => {
+    honourLimit();
+
+    const result = await runTool<{ url: string; limit?: number }, MapOutput>(mapTool, {
+      url: 'https://firecrawl.dev',
+      limit: mapFixture.links.length + 1,
+    });
+
+    expect(result.links).toHaveLength(mapFixture.links.length);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('counts a full page as truncated even when blocked links were dropped from it', async () => {
+    mapMock.mockResolvedValueOnce({
+      links: [{ url: 'https://acme.example/pricing' }, { url: 'https://twitter.com/acme' }],
+    });
+
+    const result = await runTool<{ url: string; limit?: number }, MapOutput>(mapTool, {
+      url: 'acme.example',
+      limit: 2,
+    });
+
+    expect(result.links).toHaveLength(1);
     expect(result.truncated).toBe(true);
   });
 

@@ -26,14 +26,41 @@
  * `dist/index.d.ts`), so the remote job is stopped rather than left billing.
  *
  * The polling interval matches the spec (3s) rather than the SDK's 2s default.
+ *
+ * ### A started job is never orphaned
+ *
+ * Once the job has an id it is billing, so every way out of the poll loop other
+ * than a terminal status cancels it:
+ *
+ * - an abort cancels fire-and-forget and rethrows, because the caller is gone
+ *   and a cancel failure must not replace the abort reason;
+ * - any other error (status polling exhausting its retries, say) cancels, waits
+ *   for the answer, and resolves as `failed` with the original error and the
+ *   cancel outcome in `error`;
+ * - a run still going after {@link MAX_RUN_MS} is cancelled the same way. A
+ *   Studio call carries no abort signal, so without this bound a job the API
+ *   never finishes would be polled forever.
+ *
+ * Only `completed`, `failed` and `cancelled` end the loop — the set the SDK's
+ * own `waitAgent` treats as terminal. Any other status, including one this SDK
+ * version does not declare, means "keep waiting".
+ *
+ * ### Why the start call is not retried on gateway errors
+ *
+ * `startAgent` is a plain POST with no idempotency key. A 502, 503 or 504 does
+ * not say whether the job was created, so retrying it can start a second billed
+ * run with no id to cancel it by. Only a 429, which means the request was
+ * refused before anything started, is retried. Status polls are reads, so they
+ * keep the full transient retry.
  */
 import { createTool } from '@mastra/core/tools';
-import type { AgentStatusResponse } from 'firecrawl';
+import type { AgentStatusResponse, Firecrawl } from 'firecrawl';
 import { z } from 'zod';
 
 import {
   delay,
   firecrawlClient,
+  isRateLimited,
   reportProgress,
   withFirecrawlRetry,
   type ProgressWriter,
@@ -42,6 +69,31 @@ import { isBlockedUrl } from './filters';
 
 /** How often the job's status is checked. */
 const POLL_INTERVAL_MS = 3_000;
+
+/** Wall-clock limit on one run, after which the job is cancelled. */
+const MAX_RUN_MS = 10 * 60_000;
+
+/** Statuses after which the job will not change again (SDK `waitAgent` parity). */
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Cancel `jobId` and describe the outcome for the returned `error`.
+ *
+ * Never throws: the run is already failing for a better reason, and a cancel
+ * that fails is reported rather than allowed to replace it.
+ */
+async function cancelJob(client: Firecrawl, jobId: string): Promise<string> {
+  try {
+    const cancelled = await client.cancelAgent(jobId);
+    return cancelled ? `job ${jobId} was cancelled` : `cancelling job ${jobId} was not acknowledged`;
+  } catch (error) {
+    return `cancelling job ${jobId} failed: ${describeError(error)}`;
+  }
+}
 
 /** Matches an absolute http(s) url anywhere in a string. */
 const URL_PATTERN = /https?:\/\/[^\s"'<>)\]}]+/g;
@@ -124,7 +176,7 @@ export const firecrawlAgentTool = createTool({
 
     const started = await withFirecrawlRetry(
       () => client.startAgent({ prompt, urls, schema }),
-      { signal: abortSignal, label: 'startAgent' }
+      { signal: abortSignal, label: 'startAgent', retryIf: isRateLimited }
     );
 
     if (!started.success || !started.id) {
@@ -132,6 +184,7 @@ export const firecrawlAgentTool = createTool({
     }
 
     const jobId = started.id;
+    const deadline = Date.now() + MAX_RUN_MS;
 
     try {
       for (;;) {
@@ -142,7 +195,11 @@ export const firecrawlAgentTool = createTool({
           label: `getAgentStatus ${jobId}`,
         });
 
-        if (status.status !== 'processing') {
+        // Compared as a string: the SDK's union omits `cancelled`, which the
+        // API does return and its own `waitAgent` treats as terminal.
+        const state: string = status.status;
+
+        if (TERMINAL_STATUSES.has(state)) {
           const sources = collectSources(status, urls);
 
           for (const source of sources) {
@@ -150,10 +207,20 @@ export const firecrawlAgentTool = createTool({
           }
 
           return {
-            status: status.status === 'completed' ? ('completed' as const) : ('failed' as const),
+            status: state === 'completed' ? ('completed' as const) : ('failed' as const),
             data: status.data ?? null,
             sources,
-            error: status.error,
+            error: status.error ?? (state === 'cancelled' ? `Research agent job ${jobId} was cancelled.` : undefined),
+          };
+        }
+
+        if (Date.now() >= deadline) {
+          const cancelled = await cancelJob(client, jobId);
+          return {
+            status: 'failed' as const,
+            data: null,
+            sources: [],
+            error: `Research agent did not finish within ${MAX_RUN_MS / 60_000} minutes; ${cancelled}.`,
           };
         }
 
@@ -165,8 +232,16 @@ export const firecrawlAgentTool = createTool({
         // Fire and forget: the caller is already gone, and failing to cancel
         // must not replace the abort reason with a network error.
         void Promise.resolve(client.cancelAgent(jobId)).catch(() => undefined);
+        throw error;
       }
-      throw error;
+
+      const cancelled = await cancelJob(client, jobId);
+      return {
+        status: 'failed' as const,
+        data: null,
+        sources: [],
+        error: `Research agent job ${jobId} stopped: ${describeError(error)}; ${cancelled}.`,
+      };
     }
   },
 });

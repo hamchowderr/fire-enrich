@@ -249,7 +249,9 @@ export const mapTool = createTool({
     url: z.string(),
     links: z.array(z.object({ url: z.string(), title: z.string().optional() })),
     blockedCount: z.number().describe('Urls dropped because they were on a blocked domain.'),
-    truncated: z.boolean().describe('True when the site has more urls than were returned.'),
+    truncated: z
+      .boolean()
+      .describe('True when the list hit the limit, so the site may have more urls than were returned.'),
   }),
   execute: async ({ url, search, limit }, { abortSignal, writer }) => {
     const target = url.startsWith('http') ? url : `https://${url}`;
@@ -267,14 +269,20 @@ export const mapTool = createTool({
       label: `map ${target}`,
     });
 
-    const { allowed, blocked } = splitBlocked(response.links ?? [], (link) => link.url);
+    const returned = response.links ?? [];
+    const { allowed, blocked } = splitBlocked(returned, (link) => link.url);
     const links = allowed.slice(0, cap).map((link) => ({ url: link.url, title: link.title }));
 
     return {
       url: target,
       links,
       blockedCount: blocked.length,
-      truncated: allowed.length > links.length,
+      // The API is asked for at most `cap` links, so it can never hand back
+      // more than were kept. What it can do is stop *at* the cap, and a full
+      // page is the only sign that the site may hold more urls than returned.
+      // Counted before the blocked filter: a full page is full even when some
+      // of it was dropped.
+      truncated: returned.length >= cap,
     };
   },
 });
