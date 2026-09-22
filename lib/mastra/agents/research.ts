@@ -21,10 +21,14 @@
  * ## Memory
  *
  * The browser agent refuses to track its page without a memory thread and
- * resource (see `browser.ts`). A sub-agent only gets them when its parent runs
- * with both, so browser-strategy calls pass `memory: { thread: runId,
- * resource: sessionId }`; Mastra then gives the delegated run its own thread
- * under that resource. Other strategies run without memory. The agent always
+ * resource (see `browser.ts`). On 1.67 a sub-agent is given memory only when
+ * its parent call carries both a thread and a resource, so browser-strategy
+ * calls pass `memory: { thread: runId, resource: sessionId }`. Those ids switch
+ * the injection on; they are not the sub-agent's own. The delegated run gets
+ * a thread and resource of its own, derived by Mastra (`generateId`, or from
+ * ids the model puts in the delegation call): in Studio they came out as
+ * `<runId>-<uuid>` and `<sessionId>-browser`. Other strategies run without
+ * memory. The agent always
  * carries a `Memory` because the `memory` call option needs one to act on.
  *
  * Output is requested by the caller as `structuredOutput: PhaseOutput`.

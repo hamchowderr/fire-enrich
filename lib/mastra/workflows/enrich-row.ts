@@ -38,6 +38,7 @@ import { z } from 'zod';
 import { RESEARCH_MODEL_KEY, RESEARCH_STRATEGY_KEY } from '../agents/research-context';
 import { checkFindings, toEnrichments, type GroupResult } from '../mappers';
 import { restrictPlan } from '../plan-cache';
+import { readUrlsFromToolResult } from '../read-urls';
 import { resolvePlan } from '../plan-fallback';
 import {
   CompanyContext,
@@ -52,7 +53,6 @@ import {
   type ResearchGroupType,
 } from '../schemas';
 import { isFirecrawlProgressEvent, type FirecrawlProgressEvent } from '../tools';
-import { isBlockedUrl } from '../tools/filters';
 
 /** Concurrency of the non-browser research pass. */
 const RESEARCH_CONCURRENCY = 2;
@@ -168,36 +168,6 @@ function progressEventsIn(chunk: unknown, depth = 0): FirecrawlProgressEvent[] {
 
   const payload = (chunk as { payload?: { output?: unknown } }).payload;
   return payload && 'output' in payload ? progressEventsIn(payload.output, depth + 1) : [];
-}
-
-const URL_PATTERN = /https?:\/\/[^\s"'<>)\]}]+/g;
-
-/**
- * The urls a sub-agent's result shows it read: those named in its answer, and
- * the `url` its own tools were called with or returned. Page text inside
- * those tool results is not walked, because a link on a page is not a page
- * that was read.
- */
-function subAgentReadUrls(result: unknown): string[] {
-  const found = new Set<string>();
-  const add = (value: unknown) => {
-    if (typeof value !== 'string') return;
-    for (const match of value.match(URL_PATTERN) ?? []) found.add(match.replace(/[.,;:]+$/, ''));
-  };
-
-  const { text, subAgentToolResults } = (result ?? {}) as {
-    text?: unknown;
-    subAgentToolResults?: Array<{ args?: { url?: unknown }; result?: { url?: unknown }; isError?: boolean }>;
-  };
-
-  add(text);
-  for (const toolResult of subAgentToolResults ?? []) {
-    if (toolResult.isError) continue;
-    add(toolResult.args?.url);
-    add(toolResult.result?.url);
-  }
-
-  return [...found];
 }
 
 function bulletList(items: readonly string[], empty: string): string {
@@ -368,21 +338,19 @@ function researchGroupStep<TId extends string>(id: TId) {
       for await (const chunk of stream.fullStream) {
         const type = (chunk as { type?: string }).type;
 
+        // Progress is forwarded for the UI only. It is written before a fetch,
+        // so it says nothing about whether the page was read.
         if (type === 'tool-output') {
           for (const event of progressEventsIn(chunk)) {
-            if (event.sourceUrl && !isBlockedUrl(event.sourceUrl)) readUrls.add(event.sourceUrl);
             await writer.write({ ...event, groupId: group.id } satisfies FirecrawlProgressEvent);
           }
         }
 
-        // What a sub-agent read is only visible in its result: its text names
-        // the url, and its own tool results carry the pages.
+        // What was read comes from successful tool results (see read-urls.ts).
         if (type === 'tool-result') {
           const payload = (chunk as { payload?: { toolName?: string; result?: unknown; isError?: boolean } })
             .payload;
-          if (payload?.toolName?.startsWith('agent-') && !payload.isError) {
-            for (const url of subAgentReadUrls(payload.result)) if (!isBlockedUrl(url)) readUrls.add(url);
-          }
+          if (payload) for (const url of readUrlsFromToolResult(payload)) readUrls.add(url);
         }
       }
 

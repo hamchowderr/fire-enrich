@@ -99,6 +99,34 @@
       "response": {
         "content": "The team is about fifty people, but this is not the JSON you asked for."
       }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Careers page",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_careers_scrape",
+            "name": "scrape",
+            "arguments": "{\"url\":\"https://www.firecrawl.dev/careers\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Careers page",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"open_roles\",\"value\":\"Founding Engineer\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/careers\",\"quote\":\"We are hiring a Founding Engineer.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
     }
   ]
 }

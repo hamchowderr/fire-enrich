@@ -8,7 +8,8 @@
  * group whose model answer is not JSON, so one run covers: identification, a
  * search group, a hosted-agent group, a browser group running in its own pass,
  * the evidence check dropping a url no tool read, and a structured-output miss
- * that leaves its field unknown while the row still completes.
+ * that leaves its field unknown while the row still completes, and a scrape
+ * that fails with a 404 whose invented quote is dropped.
  *
  * Requires AIMock on `AIMOCK_URL` (`npm run test:ai` starts it).
  */
@@ -73,12 +74,14 @@ const PLAN: ResearchPlanType = {
     field('open_source_repo', 'Open Source Repo', 'agent'),
     field('homepage_headline', 'Homepage Headline', 'browser'),
     field('employee_count', 'Employee Count', 'search', 'number'),
+    field('open_roles', 'Open Roles', 'search'),
   ],
   groups: [
     group('product', 'Product and positioning', 'search', ['product_summary']),
     group('open-source', 'Open source footprint', 'agent', ['open_source_repo']),
     group('homepage', 'Homepage headline', 'browser', ['homepage_headline']),
     group('team', 'Team size', 'search', ['employee_count']),
+    group('careers', 'Careers page', 'search', ['open_roles']),
   ],
   interpretation: 'Test plan with one group per strategy.',
 };
@@ -96,6 +99,7 @@ type Chunk = { type: string; payload?: { output?: Record<string, unknown>; stepN
 let chunks: Chunk[];
 let output: ReturnType<typeof EnrichRowOutput.parse>;
 let status: string;
+const scrapedUrls: string[] = [];
 
 /** The chat requests AIMock received. */
 async function journal(): Promise<Array<{ body?: { messages?: Array<{ role: string; content: unknown }>; tools?: Array<{ function?: { name?: string } }> } }>> {
@@ -114,7 +118,12 @@ beforeAll(async () => {
 
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   searchMock.mockResolvedValue(searchFixture);
-  scrapeMock.mockResolvedValue(scrapeFixture);
+  // The careers page does not exist: the scrape fails, so it was never read.
+  scrapeMock.mockImplementation(async (url: string) => {
+    scrapedUrls.push(url);
+    if (url.includes('/careers')) throw Object.assign(new Error('Request failed with status code 404'), { status: 404 });
+    return scrapeFixture;
+  });
   mapMock.mockResolvedValue(mapFixture);
   startAgentMock.mockResolvedValue({ success: true, id: 'agent_fixture_job' });
   getAgentStatusMock.mockResolvedValue(agentFixture);
@@ -201,19 +210,27 @@ describe('enrichRow workflow', () => {
 
   it('leaves the fields of a group whose structured output failed unknown', () => {
     expect(output.enrichments.employee_count).toBeUndefined();
-    expect(output.unknown).toEqual([
-      { field: 'employee_count', reason: expect.stringMatching(/did not return a valid result/) },
-    ]);
+    expect(output.unknown).toContainEqual({
+      field: 'employee_count',
+      reason: expect.stringMatching(/did not return a valid result/),
+    });
     expect(output.groups.find((group) => group.groupId === 'team')).toMatchObject({
       structuredOutputFailed: true,
       found: 0,
     });
   });
 
+  it('drops a quote citing a page whose scrape failed', () => {
+    expect(scrapedUrls).toContain('https://www.firecrawl.dev/careers');
+    expect(output.enrichments.open_roles).toBeUndefined();
+    expect(output.unknown).toContainEqual({ field: 'open_roles', reason: expect.stringMatching(/no tool read/) });
+    expect(output.unknown.map((item) => item.field).sort()).toEqual(['employee_count', 'open_roles']);
+  });
+
   it('runs the browser group in its own pass, after the others', () => {
     const order = output.groups.map((group) => group.groupId);
 
-    expect(order).toEqual(['product', 'open-source', 'team', 'homepage']);
+    expect(order).toEqual(['product', 'open-source', 'team', 'careers', 'homepage']);
     expect(output.groups.find((group) => group.groupId === 'homepage')?.strategy).toBe('browser');
   });
 

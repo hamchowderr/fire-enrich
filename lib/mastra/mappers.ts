@@ -167,6 +167,9 @@ export function toEnrichments(
   const unknown: Array<{ field: string; reason: string }> = [];
 
   for (const field of fields) {
+    // A plan that names a field in two groups gets the first group's finding,
+    // even when that one is null and a later group found a value. Known
+    // limitation, to be fixed by preferring the best-supported finding.
     const group = groups.find((candidate) => candidate.fieldNames.includes(field.name));
 
     if (!group) {
