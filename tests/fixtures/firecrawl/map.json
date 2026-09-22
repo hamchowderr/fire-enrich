@@ -1,0 +1,41 @@
+{
+  "id": "map_fixture_0001",
+  "links": [
+    {
+      "url": "https://www.firecrawl.dev/glossary/web-scraping-apis/what-is-batch-web-scraping.md"
+    },
+    {
+      "url": "https://www.firecrawl.dev/blog/ai-powered-web-scraping-solutions",
+      "title": "Top 7 AI-Powered Web Scraping Solutions in 2026",
+      "description": "Discover the most advanced AI web scraping tools that are revolutionizing data extraction with natural language processing and machine learning capabilities."
+    },
+    {
+      "url": "https://www.firecrawl.dev/glossary/web-search-apis/paper-search-api-research-platform-backend",
+      "title": "How do research platforms use a paper search API as a bac...",
+      "description": "Research platforms use a paper search API as a backend by outsourcing ingestion, ranking, and full-text retrieval to a hosted index, so their product only ha..."
+    },
+    {
+      "url": "https://www.firecrawl.dev/blog/why-is-cli",
+      "title": "What is a CLI and Why AI Agents Prefer It",
+      "description": "Why AI agents prefer the CLI: the token math, Terminal-Bench data, and the Unix tools (git, gh, ripgrep, curl) agents reach for."
+    },
+    {
+      "url": "https://www.firecrawl.dev/blog/anydoc-and-pdf-inspector",
+      "title": "Introducing AnyDoc and pdf-inspector: Firecrawl's open-so...",
+      "description": "Two Firecrawl Rust libraries that turn every common document format into clean markdown. pdf-inspector handles PDFs. AnyDoc handles the other 14 formats. Bot..."
+    },
+    {
+      "url": "https://www.firecrawl.dev/blog/antigravity-skills",
+      "title": "Which Antigravity skills are worth installing in 2026?",
+      "description": "Twelve Antigravity skills tested in a clean workspace: Firecrawl for live web data, Build with Google bundles, and cross-agent picks."
+    },
+    {
+      "url": "https://www.firecrawl.dev/partner-program",
+      "title": "Partner API | Firecrawl",
+      "description": "Provision Firecrawl accounts for your users from your own backend. Set up the Partner API or Gateway yourself in the dashboard: sign in, choose a setup, acce..."
+    },
+    {
+      "url": "https://www.firecrawl.dev/glossary/web-search-apis/use-web-search-api-commercial-products.md"
+    }
+  ]
+}

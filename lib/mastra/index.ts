@@ -4,7 +4,9 @@ import path from 'node:path';
 import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 
+import { browserAgent } from './agents/browser';
 import { smokeAgent } from './agents/smoke';
+import { toolsSmokeAgent } from './agents/tools-smoke';
 import { configureAIMock } from './lib/aimock';
 
 // Route OpenAI-compatible clients at AIMock when `USE_AIMOCK=true`. Runs before
@@ -77,6 +79,18 @@ function createMastra() {
       // Temporary. Remove together with lib/mastra/agents/smoke.ts once the
       // planner agent exists.
       smoke: smokeAgent,
+      // Temporary. Remove together with lib/mastra/agents/tools-smoke.ts once
+      // the research agent calls the Firecrawl tools itself.
+      toolsSmoke: toolsSmokeAgent,
+      /**
+       * Registered, but not yet wired to anything.
+       *
+       * The research agent will attach this as a sub-agent tool for a group
+       * whose planned strategy is `browser`, and only then. Registering it here
+       * is what makes that attachment possible later and what makes it
+       * reachable from Studio now.
+       */
+      browser: browserAgent,
     },
   });
 }
