@@ -36,7 +36,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# mastra build output and local libSQL store
-# (*.db* also covers SQLite's -shm and -wal sidecar files)
+# mastra build output and local libSQL store (with SQLite's -shm and -wal sidecars)
 .mastra/
-*.db*
+*.db
+*.db-shm
+*.db-wal
