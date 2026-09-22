@@ -268,9 +268,7 @@ export async function deleteProfile(id: string): Promise<boolean> {
  * have to know that `models` may be missing keys — or missing entirely, which is
  * what a caller holding a profile read before this column existed would see.
  *
- * @public Part of this module's API. Nothing imports it yet; the planner will,
- * to pick the model for a run from the profile it was given. Same arrangement
- * as {@link DEFAULT_MODEL_IDS}, which this falls back to.
+ * The planner agent calls it to pick its model from the profile it was given.
  */
 export function resolveProfileModels(
   profile: Pick<Profile, 'models'> | null | undefined

@@ -5,6 +5,7 @@ import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 
 import { browserAgent } from './agents/browser';
+import { plannerAgent } from './agents/planner';
 import { smokeAgent } from './agents/smoke';
 import { toolsSmokeAgent } from './agents/tools-smoke';
 import { configureAIMock } from './lib/aimock';
@@ -76,8 +77,8 @@ function createMastra() {
       authToken: process.env.TURSO_AUTH_TOKEN,
     }),
     agents: {
-      // Temporary. Remove together with lib/mastra/agents/smoke.ts once the
-      // planner agent exists.
+      // Temporary. Removed together with lib/mastra/agents/smoke.ts, its route,
+      // fixture and test by the research workflow issue (fe-3ec).
       smoke: smokeAgent,
       // Temporary. Remove together with lib/mastra/agents/tools-smoke.ts once
       // the research agent calls the Firecrawl tools itself.
@@ -91,6 +92,7 @@ function createMastra() {
        * reachable from Studio now.
        */
       browser: browserAgent,
+      planner: plannerAgent,
     },
   });
 }
