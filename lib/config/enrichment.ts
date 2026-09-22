@@ -11,6 +11,13 @@ export const ENRICHMENT_CONFIG = {
   CONCURRENT_ROWS: 10,
 
   /**
+   * Rows processed at once by the Mastra engine (`ENRICH_ENGINE=mastra`).
+   * Lower than the legacy value: each row already runs two research groups at
+   * once, and a hosted-agent group holds a Firecrawl job for minutes.
+   */
+  MASTRA_CONCURRENT_ROWS: 5,
+
+  /**
    * Delay between batches (milliseconds)
    * Helps prevent rate limiting
    */

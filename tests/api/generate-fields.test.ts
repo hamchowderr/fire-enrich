@@ -178,7 +178,8 @@ describe(`POST ${ROUTE}`, () => {
 
       // What reached the model: JSON-schema structured output, and a system
       // prompt carrying the profile, the goal and the audience.
-      const [last] = (await journal()).slice(-1);
+      // The newest planner request for this goal: other test files share the mock.
+      const [last] = (await journal()).filter((entry) => JSON.stringify(entry.body).includes(`Goal: ${GOAL}`)).slice(-1);
       const body = last?.body as {
         response_format?: { type?: string };
         messages?: Array<{ role: string; content: unknown }>;
@@ -230,7 +231,7 @@ describe(`POST ${ROUTE}`, () => {
       // The profile layer was never asked, and the model was told it had none.
       expect(getProfile).not.toHaveBeenCalled();
       expect(listProfiles).not.toHaveBeenCalled();
-      const [last] = (await journal()).slice(-1);
+      const [last] = (await journal()).filter((entry) => JSON.stringify(entry.body).includes(GENERIC_GOAL)).slice(-1);
       const system = JSON.stringify(
         (last?.body as { messages?: Array<{ role: string }> }).messages?.filter(
           (message) => message.role === 'system'
