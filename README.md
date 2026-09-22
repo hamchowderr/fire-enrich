@@ -9,10 +9,10 @@ Turn a simple list of emails into a rich dataset with company profiles, funding 
 ## Technologies
 
 - **Firecrawl**: Web scraping and content aggregation
-- **OpenAI**: Intelligent data extraction and synthesis
+- **Vercel AI Gateway**: Intelligent data extraction and synthesis (OpenAI-compatible endpoint, no OpenAI key needed)
 - **Next.js 15**: Modern React framework with App Router
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmendableai%2Ffire-enrich&env=FIRECRAWL_API_KEY,OPENAI_API_KEY&envDescription=API%20keys%20required%20for%20Fire%20Enrich&envLink=https%3A%2F%2Fgithub.com%2Fmendableai%2Ffire-enrich%23required-api-keys)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmendableai%2Ffire-enrich&env=FIRECRAWL_API_KEY,AI_GATEWAY_API_KEY&envDescription=API%20keys%20required%20for%20Fire%20Enrich&envLink=https%3A%2F%2Fgithub.com%2Fmendableai%2Ffire-enrich%23required-api-keys)
 
 ## Setup
 
@@ -21,7 +21,7 @@ Turn a simple list of emails into a rich dataset with company profiles, funding 
 | Service | Purpose | Get Key |
 |---------|---------|---------|
 | Firecrawl | Web scraping and content aggregation | [firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys) |
-| OpenAI | Intelligent data extraction | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| Vercel AI Gateway | Intelligent data extraction | [vercel.com/docs/ai-gateway](https://vercel.com/docs/ai-gateway) |
 
 ### Quick Start
 
@@ -29,7 +29,7 @@ Turn a simple list of emails into a rich dataset with company profiles, funding 
 2. Create a `.env.local` file with your API keys:
    ```
    FIRECRAWL_API_KEY=your_firecrawl_key
-   OPENAI_API_KEY=your_openai_key
+   AI_GATEWAY_API_KEY=your_ai_gateway_key
    ```
 3. Install dependencies: `npm install` or `yarn install`
 4. Run the development server: `npm run dev` or `yarn dev`

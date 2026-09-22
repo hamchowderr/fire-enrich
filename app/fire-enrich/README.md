@@ -92,10 +92,10 @@ Fire Enrich requires two API keys:
 - Get your API key from the dashboard
 - Used for web scraping and search
 
-#### 2. OpenAI API Key
-- Sign up at [platform.openai.com](https://platform.openai.com)
-- Create an API key with GPT-4 access
-- Used for intelligent data extraction
+#### 2. Vercel AI Gateway API Key
+- Sign up at [vercel.com](https://vercel.com) and enable the [AI Gateway](https://vercel.com/docs/ai-gateway)
+- Create an API key with access to OpenAI models
+- Used for intelligent data extraction (OpenAI-compatible endpoint, no OpenAI key needed)
 
 ### Installation
 
@@ -114,7 +114,7 @@ npm install
 ```bash
 # Create .env.local file
 FIRECRAWL_API_KEY=your_firecrawl_key
-OPENAI_API_KEY=your_openai_key
+AI_GATEWAY_API_KEY=your_ai_gateway_key
 ```
 
 4. Run the development server:
