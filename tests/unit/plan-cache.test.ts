@@ -50,11 +50,47 @@ describe('plan cache', () => {
     expect(cache.getPlanForFields(['c', 'a', 'b'], 1)).toBe(stored);
   });
 
-  it('misses on a different field set', () => {
+  it('misses when no cached plan covers every requested field', () => {
     cache.putPlan(plan(['a', 'b']), 0);
 
-    expect(cache.getPlanForFields(['a'], 1)).toBeNull();
     expect(cache.getPlanForFields(['a', 'b', 'c'], 1)).toBeNull();
+    expect(cache.getPlanForFields(['c'], 1)).toBeNull();
+    expect(cache.getPlanForFields([], 1)).toBeNull();
+  });
+
+  it('returns a superset plan restricted to the requested fields', () => {
+    const stored: ResearchPlanType = {
+      ...plan(['a', 'b', 'c']),
+      groups: [
+        { ...plan(['a', 'b']).groups[0], id: 'ab', fieldNames: ['a', 'b'] },
+        { ...plan(['c']).groups[0], id: 'c', fieldNames: ['c'] },
+      ],
+    };
+    cache.putPlan(stored, 0);
+
+    const restricted = cache.getPlanForFields(['b'], 1);
+
+    expect(restricted?.fields.map((field) => field.name)).toEqual(['b']);
+    expect(restricted?.groups.map((group) => [group.id, group.fieldNames])).toEqual([['ab', ['b']]]);
+    expect(restricted?.interpretation).toBe(stored.interpretation);
+    // The cached plan itself is not narrowed.
+    expect(cache.getPlanForFields(['a', 'b', 'c'], 1)).toBe(stored);
+  });
+
+  it('prefers an exact match, then the smallest covering plan', () => {
+    cache.putPlan(plan(['a', 'b', 'c', 'd'], 'widest'), 0);
+    cache.putPlan(plan(['a', 'b', 'c'], 'narrower'), 0);
+
+    expect(cache.getPlanForFields(['a'], 1)?.interpretation).toBe('narrower');
+
+    cache.putPlan(plan(['a'], 'exact'), 0);
+    expect(cache.getPlanForFields(['a'], 1)?.interpretation).toBe('exact');
+  });
+
+  it('never serves an expired superset', () => {
+    cache.putPlan(plan(['a', 'b']), 0);
+
+    expect(cache.getPlanForFields(['a'], HOUR)).toBeNull();
   });
 
   it('ignores duplicate names in the lookup', () => {
