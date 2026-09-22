@@ -1,5 +1,5 @@
 /**
- * Vitest setup, loaded before every test file (see `vitest.config.ts`).
+ * Vitest setup, loaded before every test file (see `vitest.config.mts`).
  *
  * Pins the environment so a test can never reach a real model, Firecrawl, or
  * Turso: the model path is forced onto AIMock, the provider keys are stubs
