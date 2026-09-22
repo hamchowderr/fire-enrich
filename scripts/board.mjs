@@ -132,7 +132,7 @@ function milestoneSection(ms) {
     return `<div class="col"><div class="colhead"><span>${label}</span><span class="n">${inLane.length}</span></div>${inLane.map(card).join('') || '<div class="empty">none</div>'}</div>`;
   }).join('');
   return `<section class="ms" id="board-${slug(ms)}" data-ms="${slug(ms)}" hidden>
-    <div class="mshead"><h3>${esc(ms)}</h3><span class="progress"><span style="width:${Math.round(done / items.length * 100)}%"></span></span><span class="n">${done} / ${items.length} done</span></div>
+    <div class="mshead"><h3>${esc(ms)}</h3><span class="msbar"><span style="width:${Math.round(done / items.length * 100)}%"></span></span><span class="n">${done} / ${items.length} done</span></div>
     <div class="board">${cols}</div>
   </section>`;
 }
@@ -294,8 +294,8 @@ section.part>.lead{color:var(--ink-2);max-width:62ch;margin:0 0 22px}
 .mshead{display:flex;align-items:center;gap:14px;margin-bottom:12px}
 .mshead h3{font-size:15px;font-weight:600}
 .mshead .n{font-family:var(--mono);font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
-.progress{flex:1;max-width:220px;height:6px;background:var(--panel-2);border-radius:3px;overflow:hidden}
-.progress span{display:block;height:100%;background:var(--ok)}
+.msbar{flex:1;max-width:220px;height:6px;background:var(--panel-2);border-radius:3px;overflow:hidden}
+.msbar span{display:block;height:100%;background:var(--ok)}
 .board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;align-items:start}
 .colhead{display:flex;justify-content:space-between;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:0 4px 8px;border-bottom:1px solid var(--line);margin-bottom:8px}
 .colhead .n{font-family:var(--mono);font-variant-numeric:tabular-nums}
