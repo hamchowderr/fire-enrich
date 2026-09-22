@@ -1,0 +1,17 @@
+{
+  "production": true,
+
+  // Next.js loads route handlers, pages, and layouts by file-path
+  // convention rather than by import, so a syntactic unused-exports pass
+  // would otherwise flag their exports (e.g. the default export, GET/POST)
+  // as dead. Scope the rule off for those files instead of deleting
+  // framework-required code. Using `overrides` (not `ignorePatterns`) keeps
+  // these files in the dependency graph so they still count as entry
+  // points and their imports still count as used.
+  "overrides": [
+    {
+      "files": ["app/**/route.ts", "app/**/page.tsx", "app/**/layout.tsx"],
+      "rules": { "unused-exports": "off" }
+    }
+  ]
+}

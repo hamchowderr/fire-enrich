@@ -12,39 +12,6 @@ export const EmailContext = z.object({
 
 export type EmailContext = z.infer<typeof EmailContext>;
 
-// Enrichment field definition
-export const EnrichmentFieldSchema = z.object({
-  name: z.string(),
-  displayName: z.string(),
-  description: z.string(),
-  type: z.enum(['string', 'number', 'boolean', 'array']),
-  required: z.boolean().default(false),
-});
-
-export type EnrichmentField = z.infer<typeof EnrichmentFieldSchema>;
-
-// Handoff data between agents
-export const EnrichmentHandoff = z.object({
-  email: z.string().email(),
-  emailContext: EmailContext,
-  requestedFields: z.array(EnrichmentFieldSchema),
-  discoveredData: z.record(z.string(), z.any()).optional(),
-  currentAgent: z.string().optional(),
-  processedFields: z.array(z.string()).optional(),
-});
-
-export type EnrichmentHandoff = z.infer<typeof EnrichmentHandoff>;
-
-// Result from each agent
-export const AgentResult = z.object({
-  fields: z.record(z.string(), z.any()),
-  confidence: z.record(z.string(), z.number()),
-  sources: z.record(z.string(), z.array(z.string())),
-  errors: z.record(z.string(), z.string()).optional(),
-});
-
-export type AgentResult = z.infer<typeof AgentResult>;
-
 // Final enrichment result
 export interface EnrichmentResult {
   field: string;
