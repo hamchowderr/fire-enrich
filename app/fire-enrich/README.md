@@ -107,7 +107,7 @@ cd hostedTools
 
 2. Install dependencies:
 ```bash
-pnpm install
+npm install
 ```
 
 3. Configure environment variables:
@@ -119,7 +119,7 @@ OPENAI_API_KEY=your_openai_key
 
 4. Run the development server:
 ```bash
-pnpm dev
+npm run dev
 ```
 
 5. Open [http://localhost:3000/fire-enrich](http://localhost:3000/fire-enrich)
