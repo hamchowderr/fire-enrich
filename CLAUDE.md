@@ -60,13 +60,22 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+npm run typecheck      # tsc --noEmit (includes tests/)
+npm run lint           # next lint
+npm run fallow:gate    # dead-code gate: fails on any finding not in fallow.baseline.json
+npm run test:ai        # starts AIMock on :4010, runs vitest, stops it
+npm test               # vitest only; tests/routes/* need `npm run aimock` running
+npm run build          # next build
 ```
+
+Tests never touch a real model, Firecrawl, or database: `tests/setup.ts` forces
+`USE_AIMOCK=true` (model calls answered from `fixtures/*.json`), stub API keys, and a
+temp SQLite file. Firecrawl is mocked at the SDK boundary from the recordings in
+`tests/fixtures/firecrawl/`. Every new engine feature ships tests on this harness.
+
+After deliberately removing dead code, refresh the gate with `npm run fallow:baseline`
+and commit `fallow.baseline.json`; never add entries to it by hand to get a PR green.
 
 ## Architecture Overview
 

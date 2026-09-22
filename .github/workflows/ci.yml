@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every model call is served by AIMock from ./fixtures and every provider key
+# is a stub, so this workflow needs no repository secrets and can never reach
+# a real model, Firecrawl, or Turso.
+env:
+  USE_AIMOCK: 'true'
+  AIMOCK_URL: http://127.0.0.1:4010
+  OPENAI_BASE_URL: http://127.0.0.1:4010/v1
+  AI_GATEWAY_API_KEY: stub
+  FIRECRAWL_API_KEY: stub
+  TURSO_DATABASE_URL: file:./.mastra/ci.db
+  MASTRA_TELEMETRY_DISABLED: '1'
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Fallow gate (no new dead code)
+        run: npm run fallow:gate
+
+      - name: Start AIMock
+        run: |
+          npx llmock -h 0.0.0.0 -p 4010 -f ./fixtures --validate-on-load --strict > aimock.log 2>&1 &
+          echo "Waiting for AIMock on port 4010..."
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4010/health > /dev/null 2>&1 && echo "AIMock ready" && exit 0
+            sleep 1
+          done
+          echo "=== AIMock logs ===" && cat aimock.log
+          echo "AIMock failed to start" && exit 1
+
+      # libSQL opens the local database file without creating its directory.
+      - name: Prepare local Mastra storage
+        run: mkdir -p .mastra
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
