@@ -1,0 +1,22 @@
+{
+  "success": true,
+  "status": "completed",
+  "data": {
+    "company": "Firecrawl",
+    "website": "https://www.firecrawl.dev/",
+    "description": "The web data API to search, scrape, and interact with the web at scale.",
+    "github": "https://github.com/firecrawl/firecrawl"
+  },
+  "model": "spark-1-mini",
+  "effort": "low",
+  "expiresAt": "2026-09-29T00:00:00.000Z",
+  "creditsUsed": 12,
+  "threadId": "thread_fixture_0001",
+  "threadTurn": 1,
+  "mode": "extract",
+  "exchange": {
+    "enabled": false,
+    "paidCalls": 0,
+    "creditsUsed": null
+  }
+}

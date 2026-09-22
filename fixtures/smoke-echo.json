@@ -1,0 +1,12 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "fe-ekc smoke ping"
+      },
+      "response": {
+        "content": "fe-ekc smoke ping"
+      }
+    }
+  ]
+}

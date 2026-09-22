@@ -5,6 +5,14 @@ import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 
 import { smokeAgent } from './agents/smoke';
+import { configureAIMock } from './lib/aimock';
+
+// Route OpenAI-compatible clients at AIMock when `USE_AIMOCK=true`. Runs before
+// the Mastra instance is built and before anything else in this process reads
+// `OPENAI_BASE_URL`. The agents imported above already resolve their model
+// through `resolveModel()`, which points at AIMock explicitly, so import order
+// cannot bypass the switch for them.
+configureAIMock();
 
 /**
  * Absolute `file:` url for the local fallback database.
