@@ -61,8 +61,10 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 ## Build & Test
 
 ```bash
+npm run check          # typecheck + lint + lint:mastra + fallow:gate, in order; what CI runs
 npm run typecheck      # tsc --noEmit (includes tests/)
 npm run lint           # next lint
+npm run lint:mastra    # mastra lint on lib/mastra (--strict: warnings fail)
 npm run fallow:gate    # dead-code gate: fails on any finding not in fallow.baseline.json
 npm run test:ai        # starts AIMock on :4010, runs vitest, stops it
 npm test               # vitest only; tests/routes/* need `npm run aimock` running

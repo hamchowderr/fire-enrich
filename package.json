@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "lint:mastra": "mastra lint --dir lib/mastra --strict",
     "typecheck": "tsc --noEmit",
     "db:migrate": "node scripts/db-migrate.mjs",
     "test": "vitest run",
@@ -19,6 +20,7 @@
     "studio": "mastra dev --dir lib/mastra",
     "fallow:gate": "fallow dead-code --production --baseline fallow.baseline.json --fail-on-issues",
     "fallow:baseline": "fallow dead-code --production --save-baseline fallow.baseline.json",
+    "check": "npm run typecheck && npm run lint && npm run lint:mastra && npm run fallow:gate",
     "board": "node scripts/board.mjs"
   },
   "dependencies": {

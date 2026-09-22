@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
+import Image from "next/image";
 import { Card } from "@/components/ui/card";
 import Input from "@/components/ui/input";
 import Button from "@/components/shared/button/button";
@@ -339,9 +340,14 @@ export function ChatPanel({
                                 >
                                   {faviconUrl ? (
                                     <div className="flex items-start gap-2">
-                                      <img
+                                      <Image
                                         src={faviconUrl}
                                         alt={`${domain} favicon`}
+                                        width={24}
+                                        height={24}
+                                        // A 32px PNG the optimizer cannot improve: keep the fetch
+                                        // in the browser instead of proxying it through /_next/image.
+                                        unoptimized
                                         className="flex-shrink-0 mt-0.5 w-24 h-24 rounded mr-3"
                                       />
                                       <p className="text-body-x-small leading-relaxed break-words text-gray-700 flex-1">
