@@ -35,3 +35,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# mastra build output and local libSQL store (with SQLite's -shm and -wal sidecars)
+.mastra/
+*.db
+*.db-shm
+*.db-wal

@@ -30,6 +30,8 @@
     "app/**/*.tsx",
     "components/**/*.ts",
     "components/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
     "pages/**/*.ts",
     "pages/**/*.tsx",
     ".next/types/**/*.ts"
