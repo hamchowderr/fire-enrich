@@ -10,11 +10,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ai": "start-server-and-test aimock http-get://127.0.0.1:4010/health test",
+    "aimock": "llmock -p 4010 -h 127.0.0.1 -f ./fixtures --validate-on-load --strict",
     "studio": "mastra dev --dir lib/mastra",
-    "fallow:ci": "fallow --ci"
+    "fallow:gate": "fallow dead-code --production --baseline fallow.baseline.json --fail-on-issues",
+    "fallow:baseline": "fallow dead-code --production --save-baseline fallow.baseline.json"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.88",
+    "@ai-sdk/openai": "^4.0.72",
     "@hookform/resolvers": "^5.0.1",
     "@mastra/core": "^1.67.0",
     "@mastra/libsql": "^1.23.0",
@@ -86,11 +93,13 @@
     "zod": "^3.25.3"
   },
   "devDependencies": {
+    "@copilotkit/aimock": "^1.42.1",
     "@eslint/eslintrc": "^3",
-    "@types/node": "^20",
+    "@types/node": "^22",
     "@types/papaparse": "^5.3.14",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/supertest": "^7.2.1",
     "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.4.16",
     "eslint": "^9",
@@ -100,7 +109,10 @@
     "postcss": "^8.4.32",
     "postcss-import": "^16.1.1",
     "postcss-nesting": "^13.0.2",
+    "start-server-and-test": "^3.0.12",
+    "supertest": "^7.2.2",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.1"
   }
 }
