@@ -5,6 +5,7 @@ import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 
 import { browserAgent } from './agents/browser';
+import { plannerAgent } from './agents/planner';
 import { smokeAgent } from './agents/smoke';
 import { toolsSmokeAgent } from './agents/tools-smoke';
 import { configureAIMock } from './lib/aimock';
@@ -91,6 +92,7 @@ function createMastra() {
        * reachable from Studio now.
        */
       browser: browserAgent,
+      planner: plannerAgent,
     },
   });
 }
