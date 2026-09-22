@@ -5,10 +5,11 @@ import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 
 import { browserAgent } from './agents/browser';
+import { identifyAgent } from './agents/identify';
 import { plannerAgent } from './agents/planner';
-import { smokeAgent } from './agents/smoke';
-import { toolsSmokeAgent } from './agents/tools-smoke';
+import { researchAgent } from './agents/research';
 import { configureAIMock } from './lib/aimock';
+import { enrichRowWorkflow } from './workflows/enrich-row';
 
 // Route OpenAI-compatible clients at AIMock when `USE_AIMOCK=true`. Runs before
 // the Mastra instance is built and before anything else in this process reads
@@ -77,22 +78,18 @@ function createMastra() {
       authToken: process.env.TURSO_AUTH_TOKEN,
     }),
     agents: {
-      // Temporary. Removed together with lib/mastra/agents/smoke.ts, its route,
-      // fixture and test by the research workflow issue (fe-3ec).
-      smoke: smokeAgent,
-      // Temporary. Remove together with lib/mastra/agents/tools-smoke.ts once
-      // the research agent calls the Firecrawl tools itself.
-      toolsSmoke: toolsSmokeAgent,
       /**
-       * Registered, but not yet wired to anything.
-       *
-       * The research agent will attach this as a sub-agent tool for a group
-       * whose planned strategy is `browser`, and only then. Registering it here
-       * is what makes that attachment possible later and what makes it
-       * reachable from Studio now.
+       * Attached by the research agent as its `agent-browser` sub-agent tool,
+       * for a group whose planned strategy is `browser` and only then.
+       * Registered so Studio can drive it on its own.
        */
       browser: browserAgent,
       planner: plannerAgent,
+      identify: identifyAgent,
+      research: researchAgent,
+    },
+    workflows: {
+      enrichRow: enrichRowWorkflow,
     },
   });
 }
