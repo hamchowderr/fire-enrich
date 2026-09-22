@@ -7,7 +7,10 @@ export class OpenAIService {
   private client: OpenAI;
 
   constructor(apiKey: string) {
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({
+      baseURL: 'https://ai-gateway.vercel.sh/v1',
+      apiKey,
+    });
   }
 
   createEnrichmentSchema(fields: EnrichmentField[]) {
@@ -139,7 +142,7 @@ export class OpenAIService {
       }
 
       const response = await this.client.chat.completions.create({
-        model: 'gpt-5',
+        model: 'openai/gpt-5',
         messages: [
           {
             role: 'system',
@@ -375,7 +378,7 @@ DOMAIN PARKING/SALE PAGES:
       }
       
       const response = await this.client.chat.completions.create({
-        model: 'gpt-5',
+        model: 'openai/gpt-5',
         messages: [
           {
             role: 'system',
@@ -766,7 +769,7 @@ REMEMBER: Extract exact_text from the "=== ACTUAL CONTENT BELOW ===" section, NO
         .join('\n');
       
       const response = await this.client.chat.completions.create({
-        model: 'gpt-5-mini',
+        model: 'openai/gpt-5-mini',
         messages: [
           {
             role: 'system',
@@ -836,7 +839,7 @@ ${schemaDescription}
   ): Promise<string[]> {
     try {
       const response = await this.client.chat.completions.create({
-        model: 'gpt-5',
+        model: 'openai/gpt-5',
         messages: [
           {
             role: 'system',
@@ -903,7 +906,7 @@ Return ONLY the search query, nothing else.`
       });
 
       const response = await this.client.chat.completions.create({
-        model: 'gpt-5-mini',
+        model: 'openai/gpt-5-mini',
         messages,
         temperature: 0.3,
         max_tokens: 100,
@@ -975,7 +978,7 @@ Question: ${question}
       });
 
       const response = await this.client.chat.completions.create({
-        model: 'gpt-5-mini',
+        model: 'openai/gpt-5-mini',
         messages,
         temperature: 0.1, // Lower temperature for more consistent behavior
         max_tokens: 500,
@@ -1009,7 +1012,7 @@ Question: ${question}
   ): Promise<{ url: string; title?: string }> {
     try {
       const response = await this.client.chat.completions.create({
-        model: 'gpt-5-mini',
+        model: 'openai/gpt-5-mini',
         messages: [
           {
             role: 'system',
@@ -1068,7 +1071,7 @@ Be concise but informative. If the content doesn't contain the answer, say so. W
       });
 
       const response = await this.client.chat.completions.create({
-        model: 'gpt-5',
+        model: 'openai/gpt-5',
         messages,
         temperature: 0.7,
         max_tokens: 500,

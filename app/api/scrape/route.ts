@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import FirecrawlApp from '@mendable/firecrawl-js';
+import { Firecrawl } from 'firecrawl';
+import type { ScrapeOptions } from 'firecrawl';
 import { isRateLimited } from '@/lib/rate-limit';
 
 interface ScrapeRequestBody {
@@ -50,20 +51,26 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const app = new FirecrawlApp({ apiKey });
+    const app = new Firecrawl({ apiKey });
     const body = await request.json() as ScrapeRequestBody;
     const { url, urls, ...params } = body;
 
     let result: ScrapeResult;
 
     if (url && typeof url === 'string') {
-      result = await app.scrapeUrl(url, params) as ScrapeResult;
+      const document = await app.scrape(url, params as ScrapeOptions);
+      result = { success: true, data: document as Record<string, unknown> };
     } else if (urls && Array.isArray(urls)) {
-      result = await app.batchScrapeUrls(urls, params) as ScrapeResult;
+      const job = await app.batchScrape(urls, { options: params as ScrapeOptions });
+      result = {
+        success: job.status === 'completed',
+        data: job as unknown as Record<string, unknown>,
+        ...(job.status === 'completed' ? {} : { error: `Batch scrape ${job.status}` }),
+      };
     } else {
       return NextResponse.json({ success: false, error: 'Invalid request format. Please check your input and try again.' }, { status: 400 });
     }
-    
+
     return NextResponse.json(result);
 
   } catch (error: unknown) {

@@ -15,19 +15,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.AI_GATEWAY_API_KEY) {
       return NextResponse.json(
-        { error: 'OpenAI API key not configured' },
+        { error: 'AI Gateway API key not configured' },
         { status: 500 }
       );
     }
 
     const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: 'https://ai-gateway.vercel.sh/v1',
+      apiKey: process.env.AI_GATEWAY_API_KEY,
     });
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-5',
+      model: 'openai/gpt-5',
       messages: [
         {
           role: 'system',
