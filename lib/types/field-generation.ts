@@ -13,5 +13,4 @@ export const FieldGenerationResponse = z.object({
   interpretation: z.string().describe('Brief explanation of what fields were created'),
 });
 
-export type FieldDefinitionType = z.infer<typeof FieldDefinition>;
 export type FieldGenerationResponseType = z.infer<typeof FieldGenerationResponse>;

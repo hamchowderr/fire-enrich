@@ -7,9 +7,7 @@
     "backend_family": "",
     "completeness": "complete"
   },
-  "unused_files": [
-    "scripts/board.mjs"
-  ],
+  "unused_files": [],
   "unused_exports": [
     "app/fire-enrich/config.ts:FIRE_ENRICH_CONFIG",
     "app/fire-enrich/config.ts:ERROR_MESSAGES",
@@ -23,7 +21,6 @@
     "components/shared/pixi/utils.ts:createRenderWithFPS",
     "components/shared/pixi/utils.ts:waitUntilPixiIsReady",
     "components/ui/badge.tsx:badgeVariants",
-    "components/ui/button.tsx:buttonVariants",
     "components/ui/card.tsx:CardHeader",
     "components/ui/card.tsx:CardFooter",
     "components/ui/card.tsx:CardTitle",
@@ -47,15 +44,12 @@
     "lib/rate-limit.ts:getIP",
     "lib/strategies/email-parser.ts:generateSearchQueriesFromEmail",
     "lib/types/field-generation.ts:FieldDefinition",
-    "lib/utils/email-detection.ts:getPreviewData",
     "lib/utils/field-utils.ts:formatDisplayName",
     "lib/utils/source-context.ts:highlightValue",
     "utils/set-timeout-on-visible.ts:setTimeoutOnVisible"
   ],
   "unused_types": [
     "components/ui/button.tsx:ButtonProps",
-    "lib/types/field-generation.ts:FieldDefinitionType",
-    "lib/types/field-generation.ts:FieldGenerationResponseType",
     "lib/types/index.ts:EnrichmentSession",
     "lib/utils/source-context.ts:SourceContext"
   ],
