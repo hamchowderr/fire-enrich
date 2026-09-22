@@ -18,11 +18,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get API keys
-    const openaiApiKey = process.env.AI_GATEWAY_API_KEY || request.headers.get('X-OpenAI-API-Key');
-    const firecrawlApiKey = process.env.FIRECRAWL_API_KEY || request.headers.get('X-Firecrawl-API-Key');
+    // API keys come from the environment only. They are injected from the
+    // secrets manager at runtime and are never read from the request.
+    const gatewayApiKey = process.env.AI_GATEWAY_API_KEY;
+    const firecrawlApiKey = process.env.FIRECRAWL_API_KEY;
 
-    if (!openaiApiKey || !firecrawlApiKey) {
+    if (!gatewayApiKey || !firecrawlApiKey) {
       return NextResponse.json(
         { error: 'Missing API keys' },
         { status: 500 }
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
     activeQueries.set(queryId, abortController);
 
     const firecrawl = new FirecrawlService(firecrawlApiKey);
-    const openai = new OpenAIService(openaiApiKey);
+    const openai = new OpenAIService(gatewayApiKey);
 
     // Create streaming response
     const encoder = new TextEncoder();

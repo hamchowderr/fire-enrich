@@ -45,19 +45,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Use a more compatible UUID generation
-    const sessionId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    const abortController = new AbortController();
-    activeSessions.set(sessionId, abortController);
+    // API keys come from the environment only. They are injected from the
+    // secrets manager at runtime and are never read from the request.
+    const gatewayApiKey = process.env.AI_GATEWAY_API_KEY;
+    const firecrawlApiKey = process.env.FIRECRAWL_API_KEY;
 
-    // Check environment variables and headers for API keys
-    const openaiApiKey = process.env.AI_GATEWAY_API_KEY || request.headers.get('X-OpenAI-API-Key');
-    const firecrawlApiKey = process.env.FIRECRAWL_API_KEY || request.headers.get('X-Firecrawl-API-Key');
-    
-    if (!openaiApiKey || !firecrawlApiKey) {
-      console.error('Missing API keys:', { 
-        hasOpenAI: !!openaiApiKey, 
-        hasFirecrawl: !!firecrawlApiKey 
+    if (!gatewayApiKey || !firecrawlApiKey) {
+      console.error('Missing API keys:', {
+        hasGateway: !!gatewayApiKey,
+        hasFirecrawl: !!firecrawlApiKey,
       });
       return NextResponse.json(
         { error: 'Server configuration error: Missing API keys' },
@@ -65,12 +61,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Use a more compatible UUID generation
+    const sessionId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const abortController = new AbortController();
+    activeSessions.set(sessionId, abortController);
+
     // Always use the advanced agent architecture
     const strategyName = 'AgentEnrichmentStrategy';
-    
+
     console.log(`[STRATEGY] Using ${strategyName} - Advanced multi-agent architecture with specialized agents`);
     const enrichmentStrategy = new AgentEnrichmentStrategy(
-      openaiApiKey,
+      gatewayApiKey,
       firecrawlApiKey
     );
 

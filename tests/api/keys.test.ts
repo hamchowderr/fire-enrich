@@ -1,0 +1,334 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { NextRequest } from 'next/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * API keys reach the routes from the environment only.
+ *
+ * Upstream fire-enrich lets the browser send `X-Firecrawl-API-Key` and
+ * `X-OpenAI-API-Key` and falls back to them when the variables are unset. In
+ * this deployment the keys are injected from the secrets manager at runtime
+ * and must never travel from the client, so every route below is driven with
+ * those headers set and checked both ways: with the variable unset the header
+ * is ignored and the route answers its configuration error; with it set the
+ * route proceeds and the downstream service receives the environment's key,
+ * never the header's.
+ *
+ * Handlers are called directly with a `NextRequest`. The services behind them
+ * are mocked at the module boundary, so nothing reaches Firecrawl or a model
+ * and the tests need neither AIMock nor a network.
+ */
+const {
+  strategyCtor,
+  enrichRowMock,
+  firecrawlServiceCtor,
+  openaiServiceCtor,
+  answerFromTableDataMock,
+  firecrawlSdkCtor,
+  scrapeMock,
+} = vi.hoisted(() => ({
+  strategyCtor: vi.fn(),
+  enrichRowMock: vi.fn(),
+  firecrawlServiceCtor: vi.fn(),
+  openaiServiceCtor: vi.fn(),
+  answerFromTableDataMock: vi.fn(),
+  firecrawlSdkCtor: vi.fn(),
+  scrapeMock: vi.fn(),
+}));
+
+vi.mock('@/lib/strategies/agent-enrichment-strategy', () => ({
+  AgentEnrichmentStrategy: class {
+    constructor(...args: unknown[]) {
+      strategyCtor(...args);
+    }
+    enrichRow = enrichRowMock;
+  },
+}));
+
+vi.mock('@/lib/services/firecrawl', () => ({
+  FirecrawlService: class {
+    constructor(...args: unknown[]) {
+      firecrawlServiceCtor(...args);
+    }
+    search = vi.fn();
+    scrapeUrl = vi.fn();
+  },
+}));
+
+vi.mock('@/lib/services/openai', () => ({
+  OpenAIService: class {
+    constructor(...args: unknown[]) {
+      openaiServiceCtor(...args);
+    }
+    answerFromTableData = answerFromTableDataMock;
+    generateSearchQuery = vi.fn();
+    selectBestSource = vi.fn();
+    generateConversationalResponse = vi.fn();
+  },
+}));
+
+vi.mock('firecrawl', () => ({
+  Firecrawl: class {
+    constructor(...args: unknown[]) {
+      firecrawlSdkCtor(...args);
+    }
+    scrape = scrapeMock;
+    batchScrape = vi.fn();
+  },
+}));
+
+// The scrape route consults Upstash-backed rate limiting; keep it out of the test.
+vi.mock('@/lib/rate-limit', () => ({
+  isRateLimited: async () => ({ success: true, limit: 50, remaining: 50 }),
+}));
+
+// Imported after the mocks are declared; `vi.mock` is hoisted above imports.
+import { POST as enrich } from '@/app/api/enrich/route';
+import { POST as chat } from '@/app/api/chat/route';
+import { POST as scrape } from '@/app/api/scrape/route';
+import { GET as checkEnv } from '@/app/api/check-env/route';
+
+/** What the UI still sends on every request; the routes must ignore it. */
+const BROWSER_HEADERS = {
+  'content-type': 'application/json',
+  'X-Firecrawl-API-Key': 'fc-from-browser',
+  'X-OpenAI-API-Key': 'sk-from-browser',
+};
+
+const ENRICH_BODY = {
+  // Not on `app/fire-enrich/skip-list.txt`, so the row reaches the strategy.
+  rows: [{ email: 'jane@firecrawl.dev' }],
+  fields: [
+    { name: 'company', displayName: 'Company', description: 'Company name', type: 'string', required: false },
+  ],
+  emailColumn: 'email',
+};
+
+// With table data present the chat route answers from it and never searches.
+const CHAT_BODY = {
+  question: 'What does Firecrawl do?',
+  context: { tableData: 'company,description\nFirecrawl,Web scraping API' },
+  conversationHistory: [],
+};
+
+const SCRAPE_BODY = { url: 'https://firecrawl.dev' };
+
+const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'TURSO_DATABASE_URL', 'DOLT_HOST'] as const;
+const saved: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
+
+function post(route: string, body: unknown) {
+  return new NextRequest(`http://127.0.0.1${route}`, {
+    method: 'POST',
+    headers: BROWSER_HEADERS,
+    body: JSON.stringify(body),
+  });
+}
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return sourceFiles(full);
+    return /\.(ts|tsx|js|mjs)$/.test(entry.name) ? [full] : [];
+  });
+}
+
+beforeEach(() => {
+  for (const key of ENV) saved[key] = process.env[key];
+  process.env.FIRECRAWL_API_KEY = 'fc-from-env';
+  process.env.AI_GATEWAY_API_KEY = 'gw-from-env';
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  for (const key of ENV) {
+    if (saved[key] === undefined) delete process.env[key];
+    else process.env[key] = saved[key];
+  }
+  vi.restoreAllMocks();
+  for (const mock of [
+    strategyCtor,
+    enrichRowMock,
+    firecrawlServiceCtor,
+    openaiServiceCtor,
+    answerFromTableDataMock,
+    firecrawlSdkCtor,
+    scrapeMock,
+  ]) {
+    mock.mockReset();
+  }
+});
+
+describe('POST /api/enrich', () => {
+  it('answers the configuration error when FIRECRAWL_API_KEY is unset, whatever the headers carry', async () => {
+    delete process.env.FIRECRAWL_API_KEY;
+
+    const response = await enrich(post('/api/enrich', ENRICH_BODY));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Server configuration error: Missing API keys' });
+    expect(strategyCtor).not.toHaveBeenCalled();
+  });
+
+  it('answers the configuration error when AI_GATEWAY_API_KEY is unset, whatever the headers carry', async () => {
+    delete process.env.AI_GATEWAY_API_KEY;
+
+    const response = await enrich(post('/api/enrich', ENRICH_BODY));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Server configuration error: Missing API keys' });
+    expect(strategyCtor).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with the environment keys and never the header values', async () => {
+    enrichRowMock.mockResolvedValue({
+      rowIndex: 0,
+      originalData: ENRICH_BODY.rows[0],
+      enrichments: {},
+      status: 'success',
+    });
+
+    const response = await enrich(post('/api/enrich', ENRICH_BODY));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    // Drains the stream, so the handler runs to its `complete` event.
+    expect(await response.text()).toContain('"type":"complete"');
+    expect(strategyCtor).toHaveBeenCalledTimes(1);
+    expect(strategyCtor).toHaveBeenCalledWith('gw-from-env', 'fc-from-env');
+    expect(enrichRowMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /api/chat', () => {
+  it('answers the configuration error when FIRECRAWL_API_KEY is unset, whatever the headers carry', async () => {
+    delete process.env.FIRECRAWL_API_KEY;
+
+    const response = await chat(post('/api/chat', CHAT_BODY));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Missing API keys' });
+    expect(firecrawlServiceCtor).not.toHaveBeenCalled();
+    expect(openaiServiceCtor).not.toHaveBeenCalled();
+  });
+
+  it('answers the configuration error when AI_GATEWAY_API_KEY is unset, whatever the headers carry', async () => {
+    delete process.env.AI_GATEWAY_API_KEY;
+
+    const response = await chat(post('/api/chat', CHAT_BODY));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: 'Missing API keys' });
+    expect(firecrawlServiceCtor).not.toHaveBeenCalled();
+    expect(openaiServiceCtor).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with the environment keys and never the header values', async () => {
+    answerFromTableDataMock.mockResolvedValue({ found: true, answer: 'Firecrawl scrapes the web.' });
+
+    const response = await chat(post('/api/chat', CHAT_BODY));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    expect(await response.text()).toContain('"type":"complete"');
+    expect(firecrawlServiceCtor).toHaveBeenCalledWith('fc-from-env');
+    expect(openaiServiceCtor).toHaveBeenCalledWith('gw-from-env');
+    expect(answerFromTableDataMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /api/scrape', () => {
+  it('answers the configuration error when FIRECRAWL_API_KEY is unset, whatever the headers carry', async () => {
+    delete process.env.FIRECRAWL_API_KEY;
+
+    const response = await scrape(post('/api/scrape', SCRAPE_BODY));
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: 'API configuration error. Please try again later or contact support.',
+    });
+    expect(firecrawlSdkCtor).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with the environment key and never the header value', async () => {
+    scrapeMock.mockResolvedValue({ markdown: '# Firecrawl' });
+
+    const response = await scrape(post('/api/scrape', SCRAPE_BODY));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ success: true, data: { markdown: '# Firecrawl' } });
+    expect(firecrawlSdkCtor).toHaveBeenCalledWith({ apiKey: 'fc-from-env' });
+    expect(scrapeMock).toHaveBeenCalledWith('https://firecrawl.dev', {});
+  });
+});
+
+describe('GET /api/check-env', () => {
+  it('reports each variable as a boolean and never its value', async () => {
+    process.env.FIRECRAWL_API_KEY = 'fc-secret-value';
+    process.env.AI_GATEWAY_API_KEY = 'gw-secret-value';
+    process.env.TURSO_DATABASE_URL = 'libsql://secret.turso.io';
+    process.env.DOLT_HOST = 'dolt.internal';
+
+    const response = await checkEnv();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(Object.keys(body.environmentStatus).sort()).toEqual([
+      'AI_GATEWAY_API_KEY',
+      'DOLT_HOST',
+      'FIRECRAWL_API_KEY',
+      'OPENAI_API_KEY',
+      'TURSO_DATABASE_URL',
+    ]);
+    for (const value of Object.values(body.environmentStatus)) {
+      expect(typeof value).toBe('boolean');
+    }
+    expect(body.environmentStatus).toEqual({
+      FIRECRAWL_API_KEY: true,
+      AI_GATEWAY_API_KEY: true,
+      // The UI reads the gateway key's presence under this name.
+      OPENAI_API_KEY: true,
+      TURSO_DATABASE_URL: true,
+      DOLT_HOST: true,
+    });
+
+    const text = JSON.stringify(body);
+    for (const secret of ['fc-secret-value', 'gw-secret-value', 'secret.turso.io', 'dolt.internal']) {
+      expect(text).not.toContain(secret);
+    }
+  });
+
+  it('reports false for every unset variable', async () => {
+    for (const key of ENV) delete process.env[key];
+
+    const body = await (await checkEnv()).json();
+
+    expect(body.environmentStatus).toEqual({
+      FIRECRAWL_API_KEY: false,
+      AI_GATEWAY_API_KEY: false,
+      OPENAI_API_KEY: false,
+      TURSO_DATABASE_URL: false,
+      DOLT_HOST: false,
+    });
+  });
+});
+
+describe('app/api source', () => {
+  it('reads no API key from a request header', () => {
+    const apiDir = fileURLToPath(new URL('../../app/api', import.meta.url));
+    const files = sourceFiles(apiDir);
+    expect(files.length).toBeGreaterThan(0);
+
+    // Any mention of the header name counts, so a fallback cannot creep back
+    // in under a different variable name or behind a comment.
+    const offenders = files
+      .filter((file) => /x-[\w-]*api-key/i.test(readFileSync(file, 'utf8')))
+      .map((file) => path.relative(apiDir, file));
+
+    expect(offenders).toEqual([]);
+  });
+});

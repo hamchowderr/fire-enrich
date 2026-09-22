@@ -35,19 +35,15 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  let apiKey = process.env.FIRECRAWL_API_KEY;
-  
+  // The key comes from the environment only. It is injected from the secrets
+  // manager at runtime and is never read from the request.
+  const apiKey = process.env.FIRECRAWL_API_KEY;
+
   if (!apiKey) {
-    const headerApiKey = request.headers.get('X-Firecrawl-API-Key');
-    
-    if (!headerApiKey) {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'API configuration error. Please try again later or contact support.' 
-      }, { status: 500 });
-    }
-    
-    apiKey = headerApiKey;
+    return NextResponse.json({
+      success: false,
+      error: 'API configuration error. Please try again later or contact support.',
+    }, { status: 500 });
   }
 
   try {
