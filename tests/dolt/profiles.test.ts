@@ -26,12 +26,30 @@ function fakePool() {
     end: vi.fn(async () => {}),
     query: vi.fn(async (sql: string, params: unknown[] = []) => {
       calls.push({ sql, params });
-      return [results.shift() ?? [], []];
+      const next = results.shift();
+      // A queued Error means "this call fails", so a test can put a driver
+      // failure at any position in a multi-statement path.
+      if (next instanceof Error) throw next;
+      return [next ?? [], []];
     }),
   };
 
   createPool.mockReturnValue(pool);
   return pool;
+}
+
+/**
+ * What `mysql2` throws when a write collides with a unique index.
+ *
+ * `code` is the string the driver sets; `errno` 1062 is the MySQL/Dolt number
+ * behind it. Both are present so the test fails if the production check is
+ * narrowed to the wrong one.
+ */
+function duplicateNameError() {
+  return Object.assign(
+    new Error("Duplicate entry 'Example Co' for key 'profiles.uq_profiles_name'"),
+    { code: 'ER_DUP_ENTRY', errno: 1062 }
+  );
 }
 
 async function loadProfiles() {
@@ -336,6 +354,43 @@ describe('createProfile', () => {
     await expect(createProfile({ name: '' } as never)).rejects.toThrow();
     expect(fake.calls).toHaveLength(0);
   });
+
+  it('translates a duplicate name into ProfileNameTakenError', async () => {
+    const fake = fakePool();
+    fake.queue(duplicateNameError());
+    const { createProfile, ProfileNameTakenError } = await loadProfiles();
+
+    const error = await createProfile(VALID_INPUT).catch((thrown) => thrown);
+
+    expect(error).toBeInstanceOf(ProfileNameTakenError);
+    expect(error.profileName).toBe('Example Co');
+    expect(error.message).toContain('Example Co');
+    // The class must not clobber Error.prototype.name, or stack traces lie.
+    expect(error.name).toBe('ProfileNameTakenError');
+  });
+
+  it('writes no commit when the insert is rejected as a duplicate', async () => {
+    const fake = fakePool();
+    fake.queue(duplicateNameError());
+    const { createProfile } = await loadProfiles();
+
+    await createProfile(VALID_INPUT).catch(() => {});
+
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].sql).toContain('INSERT INTO profiles');
+    expect(fake.calls.some((call) => call.sql.includes('DOLT_COMMIT'))).toBe(false);
+  });
+
+  it('propagates a non-duplicate driver failure unchanged', async () => {
+    const fake = fakePool();
+    fake.queue(Object.assign(new Error('connection lost'), { code: 'PROTOCOL_CONNECTION_LOST' }));
+    const { createProfile, ProfileNameTakenError } = await loadProfiles();
+
+    const error = await createProfile(VALID_INPUT).catch((thrown) => thrown);
+
+    expect(error).not.toBeInstanceOf(ProfileNameTakenError);
+    expect(error.message).toBe('connection lost');
+  });
 });
 
 describe('updateProfile', () => {
@@ -363,6 +418,41 @@ describe('updateProfile', () => {
     expect(await updateProfile('missing', { offer: 'x' })).toBeNull();
     expect(fake.calls).toHaveLength(1);
     expect(fake.calls[0].sql).toContain('SELECT');
+  });
+
+  it('translates a rename onto an existing name, reporting the new name', async () => {
+    const fake = fakePool();
+    // existence read succeeds, then the UPDATE collides
+    fake.queue([storedRow()], duplicateNameError());
+    const { updateProfile, ProfileNameTakenError } = await loadProfiles();
+
+    const error = await updateProfile('p1', { name: 'Second Co' }).catch((thrown) => thrown);
+
+    expect(error).toBeInstanceOf(ProfileNameTakenError);
+    // The name the client asked for, not the row's current one.
+    expect(error.profileName).toBe('Second Co');
+  });
+
+  it('writes no commit when the update is rejected as a duplicate', async () => {
+    const fake = fakePool();
+    fake.queue([storedRow()], duplicateNameError());
+    const { updateProfile } = await loadProfiles();
+
+    await updateProfile('p1', { name: 'Second Co' }).catch(() => {});
+
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1].sql).toContain('UPDATE profiles');
+    expect(fake.calls.some((call) => call.sql.includes('DOLT_COMMIT'))).toBe(false);
+  });
+
+  it('falls back to the row name when a patch that omits name still collides', async () => {
+    const fake = fakePool();
+    fake.queue([storedRow()], duplicateNameError());
+    const { updateProfile } = await loadProfiles();
+
+    const error = await updateProfile('p1', { offer: 'New offer' }).catch((thrown) => thrown);
+
+    expect(error.profileName).toBe('Example Co');
   });
 });
 

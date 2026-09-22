@@ -1,7 +1,19 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
-import { badRequest, notFound, parseJsonBody, requireDolt } from '@/lib/api/profiles-http';
-import { deleteProfile, getProfile, updateProfile, updateProfileSchema } from '@/lib/profiles';
+import {
+  badRequest,
+  conflict,
+  notFound,
+  parseJsonBody,
+  requireDolt,
+} from '@/lib/api/profiles-http';
+import {
+  deleteProfile,
+  getProfile,
+  ProfileNameTakenError,
+  updateProfile,
+  updateProfileSchema,
+} from '@/lib/profiles';
 
 /**
  * Next.js 15 hands dynamic route params as a promise, so every handler awaits
@@ -40,9 +52,13 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   const parsed = updateProfileSchema.safeParse(body.value);
   if (!parsed.success) return badRequest(parsed.error);
 
-  const profile = await updateProfile(id, parsed.data);
-
-  return profile ? NextResponse.json({ profile }) : notFound(id);
+  try {
+    const profile = await updateProfile(id, parsed.data);
+    return profile ? NextResponse.json({ profile }) : notFound(id);
+  } catch (error) {
+    if (error instanceof ProfileNameTakenError) return conflict(error);
+    throw error;
+  }
 }
 
 /** `DELETE /api/profiles/:id` */

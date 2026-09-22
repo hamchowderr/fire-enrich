@@ -127,6 +127,42 @@ function buildUpdate(
   return { sql: `UPDATE profiles SET ${assignments.join(', ')} WHERE id = ?`, params };
 }
 
+/**
+ * A write collided with the `UNIQUE` index on `profiles.name`.
+ *
+ * The database is the thing that enforces uniqueness, so this translates its
+ * error rather than trying to prevent it: a read-then-write check here would
+ * still lose the race between two concurrent creates of the same name, and
+ * would cost an extra round trip on every write to catch a case the index
+ * already catches for free.
+ *
+ * Carries the offending name so the route can name the field the client has to
+ * change, instead of a bare "conflict".
+ */
+export class ProfileNameTakenError extends Error {
+  // Not `name`: that would shadow `Error.prototype.name` and corrupt how the
+  // error prints in a stack trace.
+  readonly profileName: string;
+
+  constructor(profileName: string) {
+    super(`A profile named "${profileName}" already exists`);
+    this.name = 'ProfileNameTakenError';
+    this.profileName = profileName;
+  }
+}
+
+/**
+ * Whether the driver is reporting a unique-index collision.
+ *
+ * `profiles.name` carries the only unique index on the table, so an
+ * `ER_DUP_ENTRY` from a profile write is always that index. Matching on the
+ * driver's `code` rather than the numeric `errno` (1062) keeps this readable,
+ * and both are stable across MySQL and Dolt.
+ */
+function isDuplicateName(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === 'ER_DUP_ENTRY';
+}
+
 /** Read one profile. `null` when no row has that id. */
 export async function getProfile(id: string): Promise<Profile | null> {
   const [row] = await select<Profile>(SELECT_PROFILE_BY_ID, [id], JSON_COLUMNS);
@@ -143,22 +179,31 @@ export async function listProfiles(): Promise<Profile[]> {
  *
  * The id is generated here rather than by the database so the commit message can
  * name the row it created, and so the caller has the id without a second read.
+ *
+ * @throws {ProfileNameTakenError} when the name is already in use.
  */
 export async function createProfile(input: CreateProfileInput): Promise<Profile> {
   const profile = createProfileSchema.parse(input);
   const id = nanoid();
 
-  await query(INSERT_PROFILE, [
-    id,
-    profile.name,
-    profile.business_summary,
-    profile.offer,
-    toJsonColumn(profile.audiences),
-    toJsonColumn(profile.default_field_hints),
-    toJsonColumn(profile.crm_defaults),
-    toJsonColumn(profile.models),
-  ]);
+  try {
+    await query(INSERT_PROFILE, [
+      id,
+      profile.name,
+      profile.business_summary,
+      profile.offer,
+      toJsonColumn(profile.audiences),
+      toJsonColumn(profile.default_field_hints),
+      toJsonColumn(profile.crm_defaults),
+      toJsonColumn(profile.models),
+    ]);
+  } catch (error) {
+    if (isDuplicateName(error)) throw new ProfileNameTakenError(profile.name);
+    throw error;
+  }
 
+  // Reached only once the insert succeeded, so a rejected write never leaves a
+  // commit behind claiming it happened.
   await commit(`Create profile ${id} (${profile.name})`, COMMIT_AUTHOR);
 
   // Read back rather than returning the input: `created_at` and `updated_at`
@@ -175,6 +220,8 @@ export async function createProfile(input: CreateProfileInput): Promise<Profile>
  * The existence check is a read before the write so a missing row is a clean 404
  * rather than an `UPDATE` that reports zero affected rows — which is also what a
  * patch that changes nothing reports, and the two mean different things.
+ *
+ * @throws {ProfileNameTakenError} when the patch renames onto a name in use.
  */
 export async function updateProfile(
   id: string,
@@ -183,8 +230,20 @@ export async function updateProfile(
   const existing = await getProfile(id);
   if (!existing) return null;
 
-  const { sql, params } = buildUpdate(id, updateProfileSchema.parse(patch));
-  await query(sql, params);
+  const validated = updateProfileSchema.parse(patch);
+  const { sql, params } = buildUpdate(id, validated);
+
+  try {
+    await query(sql, params);
+  } catch (error) {
+    // A patch that leaves `name` alone cannot collide, but report whatever name
+    // the row would have ended up with rather than guessing.
+    if (isDuplicateName(error)) {
+      throw new ProfileNameTakenError(validated.name ?? existing.name);
+    }
+    throw error;
+  }
+
   await commit(`Update profile ${id} (${existing.name})`, COMMIT_AUTHOR);
 
   return getProfile(id);

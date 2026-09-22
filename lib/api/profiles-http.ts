@@ -14,6 +14,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import type { ZodError } from 'zod';
 
 import { doltConfigured } from '@/lib/dolt';
+import type { ProfileNameTakenError } from '@/lib/profiles';
 
 /**
  * 503 when Dolt is not configured, `null` when it is.
@@ -70,4 +71,19 @@ export function badRequest(error: ZodError): NextResponse {
 /** 404 for an id that matches no profile. */
 export function notFound(id: string): NextResponse {
   return NextResponse.json({ error: `No profile with id ${id}` }, { status: 404 });
+}
+
+/**
+ * 409 when a write would reuse a profile name.
+ *
+ * 409 rather than 400: the body is well-formed and the client could not have
+ * known it would collide — only the database can say, and only at write time.
+ * `field` names `name` so a form can highlight the one input to change, the
+ * same affordance the 400 path gets from an issue's `path`.
+ */
+export function conflict(error: ProfileNameTakenError): NextResponse {
+  return NextResponse.json(
+    { error: error.message, field: 'name', value: error.profileName },
+    { status: 409 }
+  );
 }

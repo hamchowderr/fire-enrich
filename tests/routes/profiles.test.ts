@@ -28,12 +28,24 @@ function fakePool() {
     end: vi.fn(async () => {}),
     query: vi.fn(async (sql: string, params: unknown[] = []) => {
       calls.push({ sql, params });
-      return [results.shift() ?? [], []];
+      const next = results.shift();
+      // A queued Error means "this call fails", so a test can put a driver
+      // failure at any position in a multi-statement path.
+      if (next instanceof Error) throw next;
+      return [next ?? [], []];
     }),
   };
 
   createPool.mockReturnValue(pool);
   return pool;
+}
+
+/** What `mysql2` throws when a write collides with `uq_profiles_name`. */
+function duplicateNameError() {
+  return Object.assign(
+    new Error("Duplicate entry 'Example Co' for key 'profiles.uq_profiles_name'"),
+    { code: 'ER_DUP_ENTRY', errno: 1062 }
+  );
 }
 
 async function loadRoutes() {
@@ -242,6 +254,29 @@ describe('with Dolt configured', () => {
       expect(response.status).toBe(400);
       expect((await response.json()).error).toMatch(/JSON/);
     });
+
+    it('answers 409 naming the name field when the name is taken', async () => {
+      const fake = fakePool();
+      fake.queue(duplicateNameError());
+      const { collection } = await loadRoutes();
+
+      const response = await collection.POST(post(VALID_BODY));
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body.field).toBe('name');
+      expect(body.value).toBe('Example Co');
+      expect(body.error).toContain('Example Co');
+      expect(commits(fake)).toHaveLength(0);
+    });
+
+    it('lets a non-duplicate driver failure surface rather than reading as 409', async () => {
+      const fake = fakePool();
+      fake.queue(Object.assign(new Error('connection lost'), { code: 'PROTOCOL_CONNECTION_LOST' }));
+      const { collection } = await loadRoutes();
+
+      await expect(collection.POST(post(VALID_BODY))).rejects.toThrow('connection lost');
+    });
   });
 
   describe('GET /api/profiles/:id', () => {
@@ -330,6 +365,20 @@ describe('with Dolt configured', () => {
       const response = await item.PUT(put('missing', { offer: 'x' }), context('missing'));
 
       expect(response.status).toBe(404);
+      expect(commits(fake)).toHaveLength(0);
+    });
+
+    it('answers 409 naming the name field when renaming onto a taken name', async () => {
+      const fake = fakePool();
+      fake.queue([storedRow()], duplicateNameError());
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(put('p1', { name: 'Second Co' }), context('p1'));
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body.field).toBe('name');
+      expect(body.value).toBe('Second Co');
       expect(commits(fake)).toHaveLength(0);
     });
   });
