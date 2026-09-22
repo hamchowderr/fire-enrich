@@ -13,12 +13,5 @@
       "files": ["app/**/route.ts", "app/**/page.tsx", "app/**/layout.tsx"],
       "rules": { "unused-exports": "off" }
     }
-  ],
-
-  // @mastra/memory is installed ahead of the code that uses it, so that adding
-  // agent memory is a code change rather than a dependency change. Remove this
-  // entry as soon as an agent constructs a Memory instance — once that happens
-  // the dependency is genuinely used and the entry would only mask a later
-  // regression.
-  "ignoreDependencies": ["@mastra/memory"]
+  ]
 }
