@@ -77,8 +77,8 @@ function createMastra() {
       authToken: process.env.TURSO_AUTH_TOKEN,
     }),
     agents: {
-      // Temporary. Remove together with lib/mastra/agents/smoke.ts once the
-      // planner agent exists.
+      // Temporary. Removed together with lib/mastra/agents/smoke.ts, its route,
+      // fixture and test by the research workflow issue (fe-3ec).
       smoke: smokeAgent,
       // Temporary. Remove together with lib/mastra/agents/tools-smoke.ts once
       // the research agent calls the Firecrawl tools itself.

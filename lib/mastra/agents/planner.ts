@@ -168,7 +168,7 @@ function renderPlannerInstructions(
     '- `strategy` (per field and per group): `search` for ordinary facts that a search plus reading the result pages answers; `agent` when the answer has to be synthesised across several sources; `browser` only when a page must be driven (clicks, forms, pagination, a logged-out app view) to see the answer.',
     '- `interpretation`: one or two sentences on how you read the goal and what the plan covers.',
     '',
-    'Do not add fields just because they are common in enrichment (funding, executives, headcount and the like). Include them only when this goal needs them.',
+    'Every field must follow from this goal and this profile. Never start from a default or generic template of enrichment fields; if you cannot say how a field serves the goal, leave it out.',
   ].join('\n');
 }
 

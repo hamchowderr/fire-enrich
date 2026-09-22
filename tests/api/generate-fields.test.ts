@@ -27,9 +27,11 @@ import plannerFixtures from '../../fixtures/planner-plan.json';
 const AIMOCK_URL = process.env.AIMOCK_URL as string;
 const ROUTE = '/api/generate-fields';
 
-const [fixture] = plannerFixtures.fixtures;
+const [fixture, genericFixture] = plannerFixtures.fixtures;
 const GOAL = fixture.match.userMessage;
 const FIXTURE_PLAN = JSON.parse(fixture.response.content);
+const GENERIC_GOAL = genericFixture.match.userMessage;
+const GENERIC_PLAN = JSON.parse(genericFixture.response.content);
 
 const EXAMPLE_PROFILE: Profile = {
   id: 'profile-example',
@@ -201,6 +203,43 @@ describe(`POST ${ROUTE}`, () => {
 
     expect(getPlanForFields(names)).toEqual(plan);
   });
+
+  it(
+    'answers the UI `{ prompt }` body with a generic plan when Dolt is not configured',
+    { timeout: 30_000 },
+    async () => {
+      // What the frozen UI hits on a fresh clone: no DOLT_* set, no profile id.
+      for (const key of Object.keys(DOLT_ENV)) delete process.env[key];
+
+      const response = await request(server)
+        .post(ROUTE)
+        .send({ prompt: GENERIC_GOAL })
+        .expect(200)
+        .expect('Content-Type', /application\/json/);
+
+      expect(response.body.success).toBe(true);
+
+      const { plan, ...legacy } = response.body.data;
+      expect(FieldGenerationResponse.strict().parse(legacy)).toEqual(legacy);
+      expect(legacy.fields.map((field: { displayName: string }) => field.displayName)).toEqual(
+        GENERIC_PLAN.fields.map((field: { displayName: string }) => field.displayName)
+      );
+      expect(legacy.interpretation).toBe(GENERIC_PLAN.interpretation);
+      expect(ResearchPlan.parse(plan)).toEqual(GENERIC_PLAN);
+
+      // The profile layer was never asked, and the model was told it had none.
+      expect(getProfile).not.toHaveBeenCalled();
+      expect(listProfiles).not.toHaveBeenCalled();
+      const [last] = (await journal()).slice(-1);
+      const system = JSON.stringify(
+        (last?.body as { messages?: Array<{ role: string }> }).messages?.filter(
+          (message) => message.role === 'system'
+        )
+      );
+      expect(system).toContain('uses a generic profile');
+      expect(system).not.toContain('Example Co');
+    }
+  );
 
   it('answers 404 for an unknown profile id', async () => {
     const response = await request(server)
