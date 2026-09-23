@@ -6,9 +6,11 @@
 -- rolled back rather than hand-repaired.
 --
 -- Every statement is `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`
--- so the whole file is safe to re-apply: the second run is a no-op and the
--- migration script makes no Dolt commit. The script splits this file on `;` at
--- end of line, so keep one statement per `;` and no `;` inside a literal.
+-- (or, for the one change to an existing table, a conditional block that reads
+-- `information_schema` first) so the whole file is safe to re-apply: the second
+-- run is a no-op and the migration script makes no Dolt commit. The script
+-- splits this file on `;` at end of line, so keep one statement per `;` and no
+-- `;` inside a literal.
 --
 -- Ids are application-generated (nanoid, 21 chars) rather than AUTO_INCREMENT:
 -- rows are created by route handlers that need the id before the insert returns,
@@ -19,7 +21,10 @@
 -- profile → an enrichment run executes that plan over a contact list → each run
 -- produces enrichments (one field value per contact) → each enrichment cites
 -- evidence. Foreign keys are declared with ON DELETE CASCADE so deleting a
--- profile takes its whole subtree with it; Dolt enforces them like MySQL.
+-- profile takes its plans with it; Dolt enforces them like MySQL. The one
+-- exception is the run → plan link, which is ON DELETE SET NULL: a run is a
+-- record of work done and results found, and deleting the plan it followed
+-- (or the profile above it) must not erase that record. See `enrichment_runs`.
 
 -- A business profile: who the business is, what it sells, who it sells to, and
 -- the defaults the planner should assume when the operator does not say
@@ -88,7 +93,13 @@ CREATE INDEX IF NOT EXISTS idx_research_plans_created_at ON research_plans (crea
 -- One execution of a plan over one contact list.
 CREATE TABLE IF NOT EXISTS enrichment_runs (
   id VARCHAR(32) NOT NULL,
-  plan_id VARCHAR(32) NOT NULL,
+  -- Nullable for two reasons. A run may follow a plan that was never saved
+  -- (one the planner wrote for a hand-typed field set and that only lived in
+  -- the process cache), so it has no plan row to point at. And when a saved
+  -- plan is deleted, the runs that followed it stay and this column is set to
+  -- NULL: the run and its enrichments are the record of what was found, and
+  -- that record outlives the plan that produced it.
+  plan_id VARCHAR(32) NULL,
   -- How to find the input list (an uploaded CSV name, a stored list id). Kept as
   -- an opaque reference so the run row does not depend on where lists live.
   list_ref VARCHAR(512) NOT NULL,
@@ -101,8 +112,30 @@ CREATE TABLE IF NOT EXISTS enrichment_runs (
   commit_hash VARCHAR(64) NULL,
   PRIMARY KEY (id),
   CONSTRAINT fk_enrichment_runs_plan
-    FOREIGN KEY (plan_id) REFERENCES research_plans (id) ON DELETE CASCADE
+    FOREIGN KEY (plan_id) REFERENCES research_plans (id) ON DELETE SET NULL
 );
+
+-- Migration for a database created when `fk_enrichment_runs_plan` was still
+-- ON DELETE CASCADE and `plan_id` NOT NULL. Re-runnable: the drop only runs
+-- while the CASCADE version is present, the add only runs while no constraint
+-- of that name exists, and MODIFY to the same definition is a no-op. On a fresh
+-- database the CREATE TABLE above already has the final shape, so every branch
+-- here chooses `SELECT 1` and `dolt_status` stays clean.
+--
+-- Dolt (2.1) has no `DROP FOREIGN KEY IF EXISTS`, and a duplicate constraint
+-- name is an error, so the choice is made by reading `information_schema` and
+-- executing the resulting statement as a prepared one. `@fe_*` names are
+-- session variables; the migration script runs the whole file on one
+-- connection, so they survive from SET to PREPARE.
+SET @fe_drop_runs_fk = (SELECT IF(COUNT(*) > 0, 'ALTER TABLE enrichment_runs DROP FOREIGN KEY fk_enrichment_runs_plan', 'SELECT 1') FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'enrichment_runs' AND CONSTRAINT_NAME = 'fk_enrichment_runs_plan' AND DELETE_RULE = 'CASCADE');
+PREPARE fe_drop_runs_fk FROM @fe_drop_runs_fk;
+EXECUTE fe_drop_runs_fk;
+DEALLOCATE PREPARE fe_drop_runs_fk;
+ALTER TABLE enrichment_runs MODIFY plan_id VARCHAR(32) NULL;
+SET @fe_add_runs_fk = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE enrichment_runs ADD CONSTRAINT fk_enrichment_runs_plan FOREIGN KEY (plan_id) REFERENCES research_plans (id) ON DELETE SET NULL', 'SELECT 1') FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'enrichment_runs' AND CONSTRAINT_NAME = 'fk_enrichment_runs_plan');
+PREPARE fe_add_runs_fk FROM @fe_add_runs_fk;
+EXECUTE fe_add_runs_fk;
+DEALLOCATE PREPARE fe_add_runs_fk;
 
 CREATE INDEX IF NOT EXISTS idx_enrichment_runs_plan_id ON enrichment_runs (plan_id);
 -- The operator view is "runs still going" and "runs newest first".

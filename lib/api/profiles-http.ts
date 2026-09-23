@@ -1,11 +1,14 @@
 /**
- * HTTP glue shared by the two profiles route files.
+ * HTTP glue shared by the Dolt-backed route files: profiles, saved plans, and
+ * field generation when it reads or saves a plan.
  *
- * Both route modules need the same three answers — "Dolt is not configured",
+ * Every one of them needs the same three answers — "Dolt is not configured",
  * "that body is not JSON", "that body is the wrong shape" — and a client should
  * not be able to tell which handler it hit from the error it gets back. Keeping
- * them here means one wording and one status code per condition instead of two
- * copies that drift.
+ * them here means one wording and one status code per condition instead of
+ * copies that drift. The helpers name the resource in their message
+ * (`Invalid profile`, `No plan with id …`) through a parameter that defaults to
+ * the profile wording, so the profiles routes read as they always did.
  *
  * Route files hold only the handlers Next.js looks for by convention, so this
  * lives outside `app/`.
@@ -20,16 +23,16 @@ import type { ProfileNameTakenError } from '@/lib/profiles';
  * 503 when Dolt is not configured, `null` when it is.
  *
  * 503 and not 500: nothing has failed, the feature is not switched on in this
- * environment. The message names the variables to set so the answer is
+ * environment. The message names the feature that needs it (a plural noun:
+ * "Profiles", "Saved plans") and the variables to set, so the answer is
  * actionable without reading the source.
  */
-export function requireDolt(): NextResponse | null {
+export function requireDolt(feature = 'Profiles'): NextResponse | null {
   if (doltConfigured()) return null;
 
   return NextResponse.json(
     {
-      error:
-        'Profiles need a Dolt database. Set DOLT_HOST and DOLT_DATABASE (see .env.example) and restart.',
+      error: `${feature} need a Dolt database. Set DOLT_HOST and DOLT_DATABASE (see .env.example) and restart.`,
     },
     { status: 503 }
   );
@@ -59,18 +62,19 @@ export async function parseJsonBody(
  *
  * The issues ship as-is (`path`, `message`, `code` per issue) rather than being
  * flattened to one sentence: a client sending five fields needs to know which
- * one was wrong, and the path is what lets a form highlight it.
+ * one was wrong, and the path is what lets a form highlight it. `subject` is
+ * what was invalid, as the message names it: "profile", "plan", "query".
  */
-export function badRequest(error: ZodError): NextResponse {
+export function badRequest(error: ZodError, subject = 'profile'): NextResponse {
   return NextResponse.json(
-    { error: 'Invalid profile', issues: error.issues },
+    { error: `Invalid ${subject}`, issues: error.issues },
     { status: 400 }
   );
 }
 
-/** 404 for an id that matches no profile. */
-export function notFound(id: string): NextResponse {
-  return NextResponse.json({ error: `No profile with id ${id}` }, { status: 404 });
+/** 404 for an id that matches no row of `resource` ("profile", "plan"). */
+export function notFound(id: string, resource = 'profile'): NextResponse {
+  return NextResponse.json({ error: `No ${resource} with id ${id}` }, { status: 404 });
 }
 
 /**

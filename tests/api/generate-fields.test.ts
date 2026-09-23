@@ -5,8 +5,10 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { POST } from '@/app/api/generate-fields/route';
+import { mastra } from '@/lib/mastra';
 import { getPlanForFields } from '@/lib/mastra/plan-cache';
 import { planIssues, ResearchPlan } from '@/lib/mastra/schemas';
+import type { SavedPlan, SavePlanInput } from '@/lib/plans';
 import type { Profile } from '@/lib/profiles';
 import { FieldGenerationResponse } from '@/lib/types/field-generation';
 
@@ -21,6 +23,9 @@ import plannerFixtures from '../../fixtures/planner-plan.json';
  * the system prompt carries the Example Co profile and the request asks for
  * JSON-schema output, so a passing test also proves the dynamic instructions
  * rendered the profile and that structured output reached the wire.
+ *
+ * Saved plans are mocked at `lib/plans.ts` the same way: `planId` and
+ * `save: true` are tested for what the route reads and writes, not for Dolt.
  *
  * Requires AIMock on `AIMOCK_URL` (`npm run test:ai` starts it).
  */
@@ -46,9 +51,12 @@ const EXAMPLE_PROFILE: Profile = {
   updated_at: '2026-01-01 00:00:00',
 };
 
-const { getProfile, listProfiles } = vi.hoisted(() => ({
+const { getProfile, listProfiles, getPlan, savePlan, findPlanByFieldSet } = vi.hoisted(() => ({
   getProfile: vi.fn<(id: string) => Promise<Profile | null>>(),
   listProfiles: vi.fn<() => Promise<Profile[]>>(),
+  getPlan: vi.fn<(id: string) => Promise<SavedPlan | null>>(),
+  savePlan: vi.fn<(input: SavePlanInput) => Promise<SavedPlan>>(),
+  findPlanByFieldSet: vi.fn<(fieldNames: readonly string[]) => Promise<SavedPlan | null>>(),
 }));
 
 // Only the two reads are replaced; `resolveProfileModels` stays real so the
@@ -58,6 +66,19 @@ vi.mock('@/lib/profiles', async (importOriginal) => ({
   getProfile,
   listProfiles,
 }));
+
+// Everything the route and the plan cache read from the saved-plans layer.
+vi.mock('@/lib/plans', () => ({ getPlan, savePlan, findPlanByFieldSet }));
+
+/** A plan as `lib/plans` would read it back: the fixture plan, saved. */
+const SAVED_PLAN: SavedPlan = {
+  id: 'plan-saved',
+  profile_id: EXAMPLE_PROFILE.id,
+  goal: GOAL,
+  audience: null,
+  plan: FIXTURE_PLAN,
+  created_at: '2026-01-01 00:00:00',
+};
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -125,6 +146,15 @@ beforeEach(() => {
   delete process.env.DEFAULT_PROFILE_ID;
   getProfile.mockImplementation(async (id) => (id === EXAMPLE_PROFILE.id ? EXAMPLE_PROFILE : null));
   listProfiles.mockResolvedValue([EXAMPLE_PROFILE]);
+  getPlan.mockResolvedValue(null);
+  findPlanByFieldSet.mockResolvedValue(null);
+  savePlan.mockImplementation(async ({ profileId, goal, audience, plan }) => ({
+    ...SAVED_PLAN,
+    profile_id: profileId,
+    goal,
+    audience: audience ?? null,
+    plan,
+  }));
 });
 
 afterEach(() => {
@@ -176,6 +206,10 @@ describe(`POST ${ROUTE}`, () => {
       expect(parsed).toEqual(FIXTURE_PLAN);
       expect(getProfile).toHaveBeenCalledWith(EXAMPLE_PROFILE.id);
 
+      // Not saved unless asked: no id in the response, nothing written.
+      expect(response.body.data).not.toHaveProperty('planId');
+      expect(savePlan).not.toHaveBeenCalled();
+
       // What reached the model: JSON-schema structured output, and a system
       // prompt carrying the profile, the goal and the audience.
       // The newest planner request for this goal: other test files share the mock.
@@ -202,7 +236,88 @@ describe(`POST ${ROUTE}`, () => {
     const { plan } = response.body.data;
     const names = plan.fields.map((field: { name: string }) => field.name).reverse();
 
-    expect(getPlanForFields(names)).toEqual(plan);
+    expect(await getPlanForFields(names)).toEqual({ plan });
+  });
+
+  it('saves the plan under the profile with `save: true` and returns its id', { timeout: 30_000 }, async () => {
+    const response = await request(server)
+      .post(ROUTE)
+      .send({ profileId: EXAMPLE_PROFILE.id, goal: GOAL, audience: 'Support leads', save: true })
+      .expect(200);
+
+    const { plan, planId, ...legacy } = response.body.data;
+    expect(FieldGenerationResponse.strict().parse(legacy)).toEqual(legacy);
+    expect(ResearchPlan.parse(plan)).toEqual(FIXTURE_PLAN);
+    expect(planId).toBe('plan-saved');
+
+    // Saved exactly as returned, under the profile and goal that were asked for.
+    expect(savePlan).toHaveBeenCalledExactlyOnceWith({
+      profileId: EXAMPLE_PROFILE.id,
+      goal: GOAL,
+      audience: 'Support leads',
+      plan,
+    });
+
+    // Cached with its id, so the enrichment run that follows records it.
+    const names = plan.fields.map((field: { name: string }) => field.name);
+    expect(await getPlanForFields(names)).toEqual({ plan, planId: 'plan-saved' });
+  });
+
+  it('answers 400 for `save: true` without a profile id, calling nothing', async () => {
+    const response = await request(server).post(ROUTE).send({ goal: GOAL, save: true }).expect(400);
+
+    expect(response.body.error).toMatch(/profileId/);
+    expect(savePlan).not.toHaveBeenCalled();
+    expect(listProfiles).not.toHaveBeenCalled();
+  });
+
+  it('returns a saved plan for `planId` without calling the planner', async () => {
+    getPlan.mockResolvedValue(SAVED_PLAN);
+    const generate = vi.spyOn(mastra.getAgent('planner'), 'generate');
+
+    try {
+      const response = await request(server)
+        .post(ROUTE)
+        .send({ planId: SAVED_PLAN.id })
+        .expect(200)
+        .expect('Content-Type', /application\/json/);
+
+      expect(response.body.success).toBe(true);
+
+      const { plan, planId, ...legacy } = response.body.data;
+      // The same envelope a generated plan gets, built from the saved plan.
+      expect(FieldGenerationResponse.strict().parse(legacy)).toEqual(legacy);
+      expect(legacy.fields.map((field: { displayName: string }) => field.displayName)).toEqual(
+        FIXTURE_PLAN.fields.map((field: { displayName: string }) => field.displayName)
+      );
+      expect(legacy.interpretation).toBe(FIXTURE_PLAN.interpretation);
+      expect(plan).toEqual(FIXTURE_PLAN);
+      expect(planId).toBe(SAVED_PLAN.id);
+
+      expect(getPlan).toHaveBeenCalledExactlyOnceWith(SAVED_PLAN.id);
+      expect(generate).not.toHaveBeenCalled();
+      expect(getProfile).not.toHaveBeenCalled();
+      expect(listProfiles).not.toHaveBeenCalled();
+
+      // Cached with its id like a freshly generated one.
+      const names = FIXTURE_PLAN.fields.map((field: { name: string }) => field.name);
+      expect(await getPlanForFields(names)).toEqual({ plan: FIXTURE_PLAN, planId: SAVED_PLAN.id });
+    } finally {
+      generate.mockRestore();
+    }
+  });
+
+  it('answers 404 for an unknown planId', async () => {
+    const response = await request(server).post(ROUTE).send({ planId: 'missing' }).expect(404);
+
+    expect(response.body.error).toBe('No plan with id missing');
+  });
+
+  it('answers 503 for a planId when Dolt is not configured', async () => {
+    for (const key of Object.keys(DOLT_ENV)) delete process.env[key];
+
+    await request(server).post(ROUTE).send({ planId: SAVED_PLAN.id }).expect(503);
+    expect(getPlan).not.toHaveBeenCalled();
   });
 
   it(
@@ -262,6 +377,13 @@ describe(`POST ${ROUTE}`, () => {
     const response = await request(server).post(ROUTE).send({ audience: 'x' }).expect(400);
 
     expect(response.body).toEqual({ error: 'Prompt is required' });
+  });
+
+  it('rejects a body of the wrong shape with the issues', async () => {
+    const response = await request(server).post(ROUTE).send({ prompt: GOAL, save: 'yes' }).expect(400);
+
+    expect(response.body.error).toBe('Invalid request');
+    expect(response.body.issues.map((issue: { path: string[] }) => issue.path.join('.'))).toContain('save');
   });
 
   it('rejects a non-JSON body', async () => {

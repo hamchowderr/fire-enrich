@@ -2,12 +2,13 @@
  * Find or make the research plan for a set of fields.
  *
  * Enrichment is keyed on the fields a run was given, and a run normally
- * follows field generation, which cached the plan it made. When it does not —
- * the cache expired, another process served field generation, or the user
- * typed the fields by hand — there is still no default plan to fall back on:
- * the queries have to be written for these fields. So the fallback asks the
- * planner, with the field definitions as the goal, and caches what it returns
- * for the next row of the same run.
+ * follows field generation, which cached the plan it made — in memory, and in
+ * Dolt when it was saved. When neither layer has it — the entry expired,
+ * another process served field generation and the plan was not saved, or the
+ * user typed the fields by hand — there is still no default plan to fall back
+ * on: the queries have to be written for these fields. So the fallback asks
+ * the planner, with the field definitions as the goal, and caches what it
+ * returns for the next row of the same run.
  *
  * The planner's plan is then reconciled with the requested fields, because
  * those are the fields the table has columns for: planned fields are matched
@@ -22,7 +23,7 @@ import { RequestContext } from '@mastra/core/request-context';
 import { generateVariableName } from '@/lib/utils/field-utils';
 
 import { normalizePlanNames, type PlannerRequestContext } from './agents/planner';
-import { getPlanForFields, putPlan, restrictPlan } from './plan-cache';
+import { getPlanForFields, putPlan, restrictPlan, type ResolvedPlan } from './plan-cache';
 import {
   planIssues,
   ResearchPlan,
@@ -108,7 +109,12 @@ type PlanSource = 'cache' | 'planner';
 
 /**
  * The plan for `fields`: from the cache when one covers them (exactly or as a
- * subset), otherwise from the planner, reconciled and cached.
+ * subset) — memory first, then saved plans — otherwise from the planner,
+ * reconciled and cached.
+ *
+ * `planId` is set when the plan came from a saved row, whichever layer served
+ * it; a run records it as `plan_id`. A cache hit reports `source: 'cache'`
+ * either way: what matters downstream is whether the planner was called.
  *
  * `planner` is the registered planner agent (`mastra.getAgent('planner')`),
  * passed in rather than imported so this module does not import the Mastra
@@ -121,11 +127,11 @@ type PlanSource = 'cache' | 'planner';
 export async function resolvePlan(
   fields: readonly EnrichFieldDefinitionType[],
   { planner, abortSignal }: { planner: Pick<Agent, 'generate'>; abortSignal?: AbortSignal }
-): Promise<{ plan: ResearchPlanType; source: PlanSource }> {
+): Promise<ResolvedPlan & { source: PlanSource }> {
   const names = fields.map((field) => field.name);
 
-  const cached = getPlanForFields(names);
-  if (cached) return { plan: cached, source: 'cache' };
+  const cached = await getPlanForFields(names);
+  if (cached) return { ...cached, source: 'cache' };
 
   const goal = fallbackGoal(fields);
   const requestContext = new RequestContext<PlannerRequestContext>();
