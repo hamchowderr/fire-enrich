@@ -105,8 +105,9 @@ export async function POST(request: NextRequest) {
             abortSignal: abortController.signal,
           });
 
-          // Pages the agent read, in order. The answer cites the last one: a
-          // scrape follows the search that found its url.
+          // Pages the agent scraped, in order. The answer cites the last one.
+          // A search hit is never cited: the model may have answered from any
+          // of the excerpts, so an answer without a scrape cites the table.
           const read: ChatSource[] = [];
 
           for await (const chunk of output.fullStream) {
@@ -129,7 +130,6 @@ export async function POST(request: NextRequest) {
                 for (const source of found.slice(0, READ_LINES_PER_SEARCH)) {
                   send({ type: 'status', message: `Reading ${source.url}`, step: 'scrape', source });
                 }
-                read.push(...found.slice(0, 1));
               } else if (chunk.payload.toolName === 'scrape') {
                 const result = (chunk.payload.result ?? {}) as ScrapeToolResult;
                 if (!result.url || result.blocked) continue;

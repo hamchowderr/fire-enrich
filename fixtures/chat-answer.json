@@ -38,6 +38,34 @@
       "response": {
         "content": "The Firecrawl homepage headline reads \"Power AI agents with clean web data\"."
       }
+    },
+    {
+      "match": {
+        "userMessage": "Question: What does the Firecrawl homepage say it is?",
+        "systemMessage": "You answer questions about a data-enrichment table",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_chat_scrape",
+            "name": "scrape",
+            "arguments": {
+              "url": "https://www.firecrawl.dev/"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Question: What does the Firecrawl homepage say it is?",
+        "systemMessage": "You answer questions about a data-enrichment table",
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "The Firecrawl homepage calls it the web data API to search, scrape, and interact with the web at scale."
+      }
     }
   ]
 }

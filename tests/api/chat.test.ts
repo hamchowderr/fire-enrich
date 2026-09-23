@@ -115,7 +115,7 @@ describe('POST /api/chat', () => {
     expect(scrapeMock).not.toHaveBeenCalled();
   });
 
-  it('searches the web and cites the page it read', { timeout: 30_000 }, async () => {
+  it('searches the web and, without a scrape, cites no search hit', { timeout: 30_000 }, async () => {
     const events = await readEvents(await post('What does the Firecrawl homepage headline say?'));
 
     expect(events).toEqual([
@@ -140,12 +140,38 @@ describe('POST /api/chat', () => {
       {
         type: 'response',
         message: 'The Firecrawl homepage headline reads "Power AI agents with clean web data".',
-        source: { url: 'https://www.firecrawl.dev/', title: 'Firecrawl' },
+        source: { type: 'table', title: 'Enriched Data Table' },
       },
       { type: 'complete' },
     ]);
+    // Nothing was scraped, so no search hit is cited as the source.
+    const hits = new Set(events.filter((event) => event.step === 'scrape').map((event) => (event.source as { url: string }).url));
+    const response = events.find((event) => event.type === 'response');
+    expect(hits.has((response?.source as { url?: string }).url ?? '')).toBe(false);
     expect(searchMock).toHaveBeenCalledOnce();
     expect(searchMock.mock.calls[0][0]).toBe('Firecrawl homepage headline');
+    expect(scrapeMock).not.toHaveBeenCalled();
+  });
+
+  it('cites the page it scraped', { timeout: 30_000 }, async () => {
+    const events = await readEvents(await post('What does the Firecrawl homepage say it is?'));
+    const source = {
+      url: 'https://www.firecrawl.dev/',
+      title: 'Firecrawl - The web data API to search, scrape, and interact with the web at scale. 🔥',
+    };
+
+    expect(events).toEqual([
+      { type: 'status', message: 'Checking enriched table data...', step: 'table_check' },
+      { type: 'status', message: 'Reading https://www.firecrawl.dev/', step: 'scrape', source },
+      {
+        type: 'response',
+        message: 'The Firecrawl homepage calls it the web data API to search, scrape, and interact with the web at scale.',
+        source,
+      },
+      { type: 'complete' },
+    ]);
+    expect(scrapeMock).toHaveBeenCalledOnce();
+    expect(searchMock).not.toHaveBeenCalled();
   });
 
   it('answers 400 to an empty question', async () => {
