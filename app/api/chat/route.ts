@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { gatewayConfigured } from '@/lib/gateway-auth';
 import { mastra } from '@/lib/mastra';
 import { chatContextMessage, type ChatTableContext } from '@/lib/mastra/agents/chat';
 
@@ -64,8 +65,10 @@ export async function POST(request: NextRequest) {
 
     // API keys come from the environment only. They are injected from the
     // secrets manager at runtime and are never read from the request. The
-    // agent's model and tools read them from the environment themselves.
-    if (!process.env.AI_GATEWAY_API_KEY || !process.env.FIRECRAWL_API_KEY) {
+    // agent's model and tools read them from the environment themselves. The
+    // gateway's credential is its key or, on Vercel, the deployment's OIDC
+    // token; `gatewayConfigured` checks both the way the gateway does.
+    if (!gatewayConfigured() || !process.env.FIRECRAWL_API_KEY) {
       return NextResponse.json(
         { error: 'Missing API keys' },
         { status: 500 }

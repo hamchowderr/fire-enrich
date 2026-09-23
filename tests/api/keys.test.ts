@@ -21,6 +21,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * so nothing reaches Firecrawl or a model and the tests need neither AIMock nor
  * a network. The model and the Firecrawl tools read their keys from the
  * environment themselves; there is no key argument to check.
+ *
+ * The gateway's credential is either `AI_GATEWAY_API_KEY` or, on Vercel, the
+ * deployment's OIDC token. Inside a Vercel function that token is not an
+ * environment variable: it arrives on the request context that `@vercel/oidc`
+ * reads from a well-known global, which the tests below install by hand.
+ * `VERCEL_OIDC_TOKEN` is the local-development form (`vercel env pull`).
  */
 const {
   resolveSessionPlanMock,
@@ -96,6 +102,24 @@ const SCRAPE_BODY = { url: 'https://firecrawl.dev' };
 const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN', 'TURSO_DATABASE_URL', 'DOLT_HOST'] as const;
 const saved: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
 
+/** The global `@vercel/oidc` reads the request context from (see its `get-context.js`). */
+const REQUEST_CONTEXT = Symbol.for('@vercel/request-context');
+const OIDC_TOKEN = 'oidc-secret-value';
+
+/** Installs a fake Vercel request context carrying only the OIDC token header. */
+function installOidcRequestContext() {
+  (globalThis as unknown as Record<symbol, unknown>)[REQUEST_CONTEXT] = {
+    get: () => ({ headers: { 'x-vercel-oidc-token': OIDC_TOKEN } }),
+  };
+}
+
+/** No gateway credential at all: no key, no local token, no request context. */
+function clearGatewayCredentials() {
+  delete process.env.AI_GATEWAY_API_KEY;
+  delete process.env.VERCEL_OIDC_TOKEN;
+  delete (globalThis as unknown as Record<symbol, unknown>)[REQUEST_CONTEXT];
+}
+
 function post(route: string, body: unknown) {
   return new NextRequest(`http://127.0.0.1${route}`, {
     method: 'POST',
@@ -125,6 +149,7 @@ afterEach(() => {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
   }
+  delete (globalThis as unknown as Record<symbol, unknown>)[REQUEST_CONTEXT];
   vi.restoreAllMocks();
   for (const mock of [resolveSessionPlanMock, startRunRecordingMock, enrichRowMock, chatStreamMock, firecrawlSdkCtor, scrapeMock]) {
     mock.mockReset();
@@ -143,8 +168,8 @@ describe('POST /api/enrich', () => {
     expect(enrichRowMock).not.toHaveBeenCalled();
   });
 
-  it('answers the configuration error when AI_GATEWAY_API_KEY is unset, whatever the headers carry', async () => {
-    delete process.env.AI_GATEWAY_API_KEY;
+  it('answers the configuration error when neither AI_GATEWAY_API_KEY nor an OIDC token is present, whatever the headers carry', async () => {
+    clearGatewayCredentials();
 
     const response = await enrich(post('/api/enrich', ENRICH_BODY));
 
@@ -152,6 +177,27 @@ describe('POST /api/enrich', () => {
     expect(await response.json()).toEqual({ error: 'Server configuration error: Missing API keys' });
     expect(resolveSessionPlanMock).not.toHaveBeenCalled();
     expect(enrichRowMock).not.toHaveBeenCalled();
+  });
+
+  it('passes the key gate with only the Vercel OIDC request context', async () => {
+    clearGatewayCredentials();
+    installOidcRequestContext();
+    resolveSessionPlanMock.mockResolvedValue({ plan: { fields: [], groups: [] }, fields: ENRICH_BODY.fields });
+    startRunRecordingMock.mockResolvedValue({ finish: vi.fn() });
+    enrichRowMock.mockResolvedValue({
+      rowIndex: 0,
+      originalData: ENRICH_BODY.rows[0],
+      enrichments: {},
+      status: 'success',
+    });
+
+    const response = await enrich(post('/api/enrich', ENRICH_BODY));
+
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain('"type":"complete"');
+    expect(text).not.toContain(OIDC_TOKEN);
+    expect(enrichRowMock).toHaveBeenCalledTimes(1);
   });
 
   it('proceeds with the environment keys and never the header values', async () => {
@@ -187,14 +233,32 @@ describe('POST /api/chat', () => {
     expect(chatStreamMock).not.toHaveBeenCalled();
   });
 
-  it('answers the configuration error when AI_GATEWAY_API_KEY is unset, whatever the headers carry', async () => {
-    delete process.env.AI_GATEWAY_API_KEY;
+  it('answers the configuration error when neither AI_GATEWAY_API_KEY nor an OIDC token is present, whatever the headers carry', async () => {
+    clearGatewayCredentials();
 
     const response = await chat(post('/api/chat', CHAT_BODY));
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'Missing API keys' });
     expect(chatStreamMock).not.toHaveBeenCalled();
+  });
+
+  it('passes the key gate with only the Vercel OIDC request context', async () => {
+    clearGatewayCredentials();
+    installOidcRequestContext();
+    chatStreamMock.mockResolvedValue({
+      fullStream: (async function* () {})(),
+      steps: Promise.resolve([{ text: 'Firecrawl scrapes the web.' }]),
+      text: Promise.resolve('Firecrawl scrapes the web.'),
+    });
+
+    const response = await chat(post('/api/chat', CHAT_BODY));
+
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain('"type":"complete"');
+    expect(text).not.toContain(OIDC_TOKEN);
+    expect(chatStreamMock).toHaveBeenCalledTimes(1);
   });
 
   it('proceeds with the environment keys and never the header values', async () => {
@@ -276,15 +340,31 @@ describe('GET /api/check-env', () => {
     }
   });
 
-  it('counts the Vercel OIDC token as a configured gateway', async () => {
+  it('counts the VERCEL_OIDC_TOKEN variable (local development) as a configured gateway', async () => {
     for (const key of ENV) delete process.env[key];
-    process.env.VERCEL_OIDC_TOKEN = 'oidc-secret-value';
+    process.env.VERCEL_OIDC_TOKEN = OIDC_TOKEN;
 
     const body = await (await checkEnv()).json();
 
     expect(body.environmentStatus.AI_GATEWAY_API_KEY).toBe(true);
     expect(body.environmentStatus.OPENAI_API_KEY).toBe(true);
-    expect(JSON.stringify(body)).not.toContain('oidc-secret-value');
+    expect(JSON.stringify(body)).not.toContain(OIDC_TOKEN);
+  });
+
+  it('counts the Vercel OIDC request context (deployed function) as a configured gateway', async () => {
+    for (const key of ENV) delete process.env[key];
+    installOidcRequestContext();
+
+    const body = await (await checkEnv()).json();
+
+    expect(body.environmentStatus).toEqual({
+      FIRECRAWL_API_KEY: false,
+      AI_GATEWAY_API_KEY: true,
+      OPENAI_API_KEY: true,
+      TURSO_DATABASE_URL: false,
+      DOLT_HOST: false,
+    });
+    expect(JSON.stringify(body)).not.toContain(OIDC_TOKEN);
   });
 
   it('reports false for every unset variable', async () => {

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+import { gatewayConfigured } from '@/lib/gateway-auth';
+
 /**
  * Reports which variables are set, as booleans only. A value never leaves the
  * server: this route exists so the UI can tell "configured" from "not
@@ -7,8 +9,9 @@ import { NextResponse } from 'next/server';
  */
 export async function GET() {
   // On Vercel the AI Gateway authenticates with the deployment's OIDC token
-  // and no key is set, so the token counts as "configured" too.
-  const gateway = !!process.env.AI_GATEWAY_API_KEY || !!process.env.VERCEL_OIDC_TOKEN;
+  // and no key is set; `gatewayConfigured` counts either credential, reading
+  // the token the way the gateway does (request context, then environment).
+  const gateway = gatewayConfigured();
   const environmentStatus = {
     FIRECRAWL_API_KEY: !!process.env.FIRECRAWL_API_KEY,
     AI_GATEWAY_API_KEY: gateway,
