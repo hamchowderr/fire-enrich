@@ -35,6 +35,22 @@ jobs:
 
       - run: npm ci
 
+      # The Chromium download is cached per Playwright version, so a run only
+      # fetches it after an upgrade. `--with-deps` also installs the browser's
+      # system libraries with apt; those are not cached, so the install step
+      # runs on every hit and skips just the download.
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
       # typecheck, next lint, mastra lint and the Fallow dead-code gate, in
       # that order; the first failure stops the chain.
       - name: Check
@@ -62,3 +78,27 @@ jobs:
         run: npm run build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+
+      # The browser tier, against the build above (`E2E_SKIP_BUILD=1` makes the
+      # Playwright config serve `.next` instead of building again). The config
+      # starts its own AIMock on 4031, the Firecrawl stub on 4131 and the app on
+      # 3601, and sets every variable the app reads itself, so the AIMock on
+      # 4010 above and this job's env play no part in it.
+      - name: E2E
+        run: npm run test:e2e
+        env:
+          E2E_SKIP_BUILD: '1'
+
+      # The HTML report, per-test screenshots and traces, and the mocks' logs
+      # (`tests/e2e/.logs/`: AIMock, the Firecrawl stub and its request log).
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e
+          path: |
+            playwright-report/
+            test-results/
+            tests/e2e/.logs/
+          if-no-files-found: ignore
+          retention-days: 14
