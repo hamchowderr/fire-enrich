@@ -273,7 +273,10 @@ export async function enrichRowWithMastra({
       };
     }
 
-    // `canceled` is a run status at runtime but missing from the 1.67 result union.
+    // A cancelled run resolves with status `canceled`. `WorkflowStreamResult`
+    // includes it, but on 1.67 `run.stream().result` is typed as the narrower
+    // `WorkflowResult` (`stream/RunOutput.d.ts`), which does not, so the
+    // comparison needs the widening cast to compile.
     if ((result.status as string) === 'canceled' || signal?.aborted) return null;
 
     const error = (result as { error?: unknown }).error;

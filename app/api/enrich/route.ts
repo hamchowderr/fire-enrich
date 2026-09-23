@@ -21,6 +21,9 @@ interface ActiveSession {
   runs: Set<CancellableRun>;
 }
 
+/** How long a cancelled session waits for its Mastra rows to settle before closing. */
+const CANCEL_SETTLE_MS = 15_000;
+
 // Store active sessions in memory (in production, use Redis or similar)
 const activeSessions = new Map<string, ActiveSession>();
 
@@ -303,13 +306,25 @@ export async function POST(request: NextRequest) {
           // Mastra runs stop promptly once cancelled; let them settle so their
           // last writes land before the stream closes. Legacy rows cannot be
           // stopped, so the legacy path does not wait for them (as before).
+          // The wait is bounded, so a tool that ignores the abort signal cannot
+          // hold the stream open.
           if (cancelled && mastraEngine) {
-            await Promise.allSettled(activePromises);
+            await Promise.race([
+              Promise.allSettled(activePromises),
+              new Promise((resolve) => setTimeout(resolve, CANCEL_SETTLE_MS)),
+            ]);
           }
 
           // Send completion
           if (!cancelled) send({ type: 'complete' });
         } catch (error) {
+          // A DELETE during plan resolution rejects the planner call on the
+          // abort signal; that is a cancel, not a failure.
+          if (abortController.signal.aborted) {
+            send({ type: 'cancelled' });
+            return;
+          }
+
           send({
             type: 'error',
             error: error instanceof Error ? error.message : 'Unknown error',

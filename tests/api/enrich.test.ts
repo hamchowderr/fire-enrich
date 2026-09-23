@@ -46,6 +46,7 @@ vi.mock('@/lib/strategies/agent-enrichment-strategy', () => ({
 }));
 
 import { DELETE, POST } from '@/app/api/enrich/route';
+import { mastra } from '@/lib/mastra';
 import { putPlan } from '@/lib/mastra/plan-cache';
 import type { ResearchPlanType } from '@/lib/mastra/schemas';
 
@@ -258,6 +259,46 @@ describe('POST /api/enrich with ENRICH_ENGINE=mastra', () => {
     // Nothing new is called after the cancel, even once the held call settles.
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(toolCalls()).toBe(callsAtCancel);
+  });
+
+  it('cancels during plan resolution: `cancelled`, not `error`', { timeout: 30_000 }, async () => {
+    process.env.ENRICH_ENGINE = 'mastra';
+
+    // A cold cache for these fields, and a planner call that only ends when
+    // it is aborted, as a real one would on the route's signal.
+    const planner = mastra.getAgent('planner');
+    const heldUntilAborted = (_message: unknown, options?: { abortSignal?: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        const signal = options?.abortSignal;
+        signal?.addEventListener('abort', () => reject(signal.reason ?? new Error('aborted')), { once: true });
+      });
+    const generate = vi
+      .spyOn(planner, 'generate')
+      .mockImplementation(heldUntilAborted as unknown as typeof planner.generate);
+
+    const uncached = [{ name: 'uncached_field', displayName: 'Uncached Field', description: 'x', type: 'string', required: false }];
+    const response = await POST(
+      new NextRequest('http://localhost/api/enrich', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rows: [{ email: 'hello@firecrawl.dev' }], fields: uncached, emailColumn: 'email' }),
+      })
+    );
+
+    let sessionId = '';
+    const events = await readEvents(response, (event) => {
+      if (event.type === 'session') sessionId = event.sessionId as string;
+      if (event.type === 'pending') {
+        // The planner is called right after `pending`; let it start first.
+        setTimeout(() => {
+          void DELETE(new NextRequest(`http://localhost/api/enrich?sessionId=${sessionId}`, { method: 'DELETE' }));
+        }, 50);
+      }
+    });
+
+    expect(generate).toHaveBeenCalledOnce();
+    expect(events.map((event) => event.type)).toEqual(['session', 'pending', 'cancelled']);
+    expect(toolCalls()).toBe(0);
   });
 
   it('answers 404 to a DELETE for an unknown session', async () => {
