@@ -1,13 +1,10 @@
 /**
  * `POST /api/enrich` and `DELETE /api/enrich` through the route handler.
  *
- * With `ENRICH_ENGINE=mastra` the route runs the enrichRow workflow: every
- * model call is answered by AIMock (`fixtures/identify-company.json`,
+ * The route runs the enrichRow workflow for every row: every model call is answered by AIMock (`fixtures/identify-company.json`,
  * `fixtures/research-group.json`) and Firecrawl is mocked at the SDK boundary
  * on the recordings in `tests/fixtures/firecrawl/`. The plan is put in the plan
  * cache first, as field generation would, so the route finds it by field set.
- * With the flag unset the legacy strategy is used; it is mocked here, because
- * what is under test is the dispatch, not the legacy engine.
  *
  * The Dolt run store (`lib/runs.ts`) is mocked too: its SQL is covered by
  * `tests/runs/`, and what is under test here is when the route calls it.
@@ -23,13 +20,12 @@ import mapFixture from '../fixtures/firecrawl/map.json';
 import scrapeFixture from '../fixtures/firecrawl/scrape.json';
 import searchFixture from '../fixtures/firecrawl/search.json';
 
-const { searchMock, scrapeMock, mapMock, startAgentMock, getAgentStatusMock, legacyEnrichRow } = vi.hoisted(() => ({
+const { searchMock, scrapeMock, mapMock, startAgentMock, getAgentStatusMock } = vi.hoisted(() => ({
   searchMock: vi.fn(),
   scrapeMock: vi.fn(),
   mapMock: vi.fn(),
   startAgentMock: vi.fn(),
   getAgentStatusMock: vi.fn(),
-  legacyEnrichRow: vi.fn(),
 }));
 
 const runs = vi.hoisted(() => ({
@@ -61,12 +57,6 @@ vi.mock('firecrawl', () => ({
     startAgent = startAgentMock;
     getAgentStatus = getAgentStatusMock;
     cancelAgent = vi.fn().mockResolvedValue(true);
-  },
-}));
-
-vi.mock('@/lib/strategies/agent-enrichment-strategy', () => ({
-  AgentEnrichmentStrategy: class {
-    enrichRow = legacyEnrichRow;
   },
 }));
 
@@ -183,17 +173,14 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete process.env.ENRICH_ENGINE;
   vi.restoreAllMocks();
-  for (const mock of [searchMock, scrapeMock, mapMock, startAgentMock, getAgentStatusMock, legacyEnrichRow, ...Object.values(runs)]) {
+  for (const mock of [searchMock, scrapeMock, mapMock, startAgentMock, getAgentStatusMock, ...Object.values(runs)]) {
     mock.mockReset();
   }
 });
 
-describe('POST /api/enrich with ENRICH_ENGINE=mastra', () => {
+describe('POST /api/enrich', () => {
   it('streams one row from session to complete', { timeout: 120_000 }, async () => {
-    process.env.ENRICH_ENGINE = 'mastra';
-
     const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]));
     const types = events.map((event) => event.type);
 
@@ -239,8 +226,6 @@ describe('POST /api/enrich with ENRICH_ENGINE=mastra', () => {
   });
 
   it('skips a personal email without running it', { timeout: 30_000 }, async () => {
-    process.env.ENRICH_ENGINE = 'mastra';
-
     const events = await readEvents(await post([{ email: 'someone@gmail.com' }]));
 
     expect(events.map((event) => event.type)).toEqual(['session', 'pending', 'result', 'complete']);
@@ -251,8 +236,6 @@ describe('POST /api/enrich with ENRICH_ENGINE=mastra', () => {
   });
 
   it('cancels mid-run: `cancelled`, no more tool calls, no result', { timeout: 60_000 }, async () => {
-    process.env.ENRICH_ENGINE = 'mastra';
-
     // The first search holds for ten seconds, so the DELETE lands mid-call.
     searchMock.mockImplementation(
       () => new Promise((resolve) => setTimeout(() => resolve(searchFixture), 10_000))
@@ -292,8 +275,6 @@ describe('POST /api/enrich with ENRICH_ENGINE=mastra', () => {
   });
 
   it('cancels during plan resolution: `cancelled`, not `error`', { timeout: 30_000 }, async () => {
-    process.env.ENRICH_ENGINE = 'mastra';
-
     // A cold cache for these fields, and a planner call that only ends when
     // it is aborted, as a real one would on the route's signal.
     const planner = mastra.getAgent('planner');
@@ -359,7 +340,6 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
     'starts the run with the resolved planId, records each row as shown, and commits before `complete`',
     { timeout: 120_000 },
     async () => {
-      process.env.ENRICH_ENGINE = 'mastra';
       runs.doltConfigured.mockReturnValue(true);
       // The plan resolves from a saved row, so it carries that row's id.
       putPlan(PLAN, { planId: 'plan_saved' });
@@ -399,7 +379,6 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   );
 
   it('does not start a run before the plan resolves: a cancel during planning records nothing', { timeout: 30_000 }, async () => {
-    process.env.ENRICH_ENGINE = 'mastra';
     runs.doltConfigured.mockReturnValue(true);
     const planner = mastra.getAgent('planner');
     vi.spyOn(planner, 'generate').mockImplementation(((_message: unknown, options?: { abortSignal?: AbortSignal }) =>
@@ -429,7 +408,6 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   });
 
   it('commits a cancelled session as `partial`, with a null planId for an unsaved plan', { timeout: 60_000 }, async () => {
-    process.env.ENRICH_ENGINE = 'mastra';
     runs.doltConfigured.mockReturnValue(true);
     searchMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(searchFixture), 10_000)));
 
@@ -444,7 +422,6 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   });
 
   it('commits a session that fails part-way as `failed`', { timeout: 30_000 }, async () => {
-    process.env.ENRICH_ENGINE = 'mastra';
     runs.doltConfigured.mockReturnValue(true);
 
     // A null row throws in the row loop, outside the per-row error handling,
@@ -465,7 +442,6 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   });
 
   it('streams one generic warning when the run cannot be recorded, and enriches every row', { timeout: 120_000 }, async () => {
-    process.env.ENRICH_ENGINE = 'mastra';
     runs.doltConfigured.mockReturnValue(true);
     runs.startRun.mockRejectedValue(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:3316'), { code: 'ECONNREFUSED' }));
 
@@ -480,34 +456,5 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
     expect(events.at(-1)?.type).toBe('complete');
     expect(runs.recordRow).not.toHaveBeenCalled();
     expect(runs.finishRun).not.toHaveBeenCalled();
-  });
-});
-
-describe('POST /api/enrich without ENRICH_ENGINE', () => {
-  it('dispatches to the legacy strategy exactly as before', { timeout: 30_000 }, async () => {
-    legacyEnrichRow.mockImplementation(async (row, _fields, _emailColumn, _onProgress, onAgentProgress) => {
-      onAgentProgress('Legacy agent working', 'info', 'https://legacy.example/');
-      return {
-        rowIndex: 0,
-        originalData: row,
-        enrichments: { product_summary: { field: 'product_summary', value: 'legacy value', confidence: 0.5 } },
-        status: 'completed',
-      };
-    });
-
-    const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]));
-
-    expect(events.map((event) => event.type)).toEqual([
-      'session',
-      'pending',
-      'processing',
-      'agent_progress',
-      'result',
-      'complete',
-    ]);
-    expect(events[3]).toMatchObject({ message: 'Legacy agent working', messageType: 'info', sourceUrl: 'https://legacy.example/' });
-    expect(events[4]).toMatchObject({ result: { status: 'completed', enrichments: { product_summary: { value: 'legacy value' } } } });
-    expect(legacyEnrichRow).toHaveBeenCalledOnce();
-    expect(toolCalls()).toBe(0);
   });
 });
