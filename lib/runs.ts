@@ -68,13 +68,35 @@
  *   profile writes commit at once, so this only happens after a manual,
  *   uncommitted edit of those tables on `main`; the run then stays on its
  *   branch, committed but unmerged.
+ *
+ * ## Lists and re-runs
+ *
+ * `list_ref` names the contact list a run covered, and two runs are runs of
+ * the same list exactly when their `list_ref`s are equal. The formats are:
+ *
+ * - `emails:sha256:<16 hex> (N rows)`: a CSV upload with no name given. The
+ *   hash is over the lowercased, trimmed emails in order ({@link listRefFor}),
+ *   so the same file uploaded again under any name is the same list.
+ * - the caller's own `listRef` (for example a CSV file name), as sent.
+ * - `crm:list:<id>` and `crm:tag:<id>`: reserved for a CRM import, a list or a
+ *   tag in the CRM by its id.
+ *
+ * {@link previousRunFor} finds the run before a given one on the same list,
+ * and {@link diffRuns} lists the values that differ between two runs.
+ *
+ * A diff cannot come from `dolt_diff`: each run inserts fresh enrichment ids,
+ * so between two runs every value is a deleted row and an inserted row, never
+ * a modified one. Instead each run's enrichments are read `AS OF` its own
+ * commit (`commit_hash`) and matched on `(contact_email, field)`. The run's
+ * own row carries `commit_hash` NULL at that commit (the hash is written by
+ * the merge), so run rows are always read from `main`'s head.
  */
 import { createHash } from 'node:crypto';
 
 import type mysql from 'mysql2/promise';
 import { nanoid } from 'nanoid';
 
-import { connect, isNothingToCommit, query, readCommitHash } from '@/lib/dolt';
+import { connect, isNothingToCommit, query, readCommitHash, select } from '@/lib/dolt';
 import type { CSVRow, EnrichmentResult } from '@/lib/types';
 
 /** Identity on run commits when `DOLT_COMMIT_AUTHOR` is unset or malformed. */
@@ -474,4 +496,237 @@ export async function finishRun(runId: string, status: FinishStatus): Promise<st
   });
 
   return hash;
+}
+
+/** A recorded run as `main`'s head holds it. */
+export interface RunSummary {
+  id: string;
+  planId: string | null;
+  listRef: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  /** The run's own commit; NULL until the run is merged into `main`. */
+  commitHash: string | null;
+}
+
+/** One value that differs between two runs of a list. */
+export interface RunChange {
+  contactEmail: string;
+  field: string;
+  /** `added`: no value in the earlier run; `removed`: none in the later one. */
+  change: 'added' | 'changed' | 'removed';
+  from: string | null;
+  to: string | null;
+  /** The later run's confidence; null for a removed value. */
+  confidence: number | null;
+  /** The later run's evidence, read at its commit; empty for a removed value. */
+  sources: Array<{ url: string; quote: string | null }>;
+}
+
+/** A run id that matches no run on `main`. */
+export class RunNotFoundError extends Error {
+  constructor(readonly runId: string) {
+    super(`No run with id ${runId}`);
+    this.name = 'RunNotFoundError';
+  }
+}
+
+/**
+ * A run row on `main` with no `commit_hash`. A run in flight or never merged
+ * has no row on `main` at all (that is a {@link RunNotFoundError}), so this
+ * only happens after a hand edit of the row; kept as a defensive branch.
+ */
+export class RunNotCommittedError extends Error {
+  constructor(readonly runId: string) {
+    super(`Run ${runId} has no commit to read`);
+    this.name = 'RunNotCommittedError';
+  }
+}
+
+/** Two runs that cannot be diffed: the same run twice, or runs of different lists. */
+export class RunsNotComparableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RunsNotComparableError';
+  }
+}
+
+const RUN_COLUMNS = 'id, plan_id, list_ref, status, started_at, finished_at, commit_hash';
+
+interface RunRow {
+  id: string;
+  plan_id: string | null;
+  list_ref: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  commit_hash: string | null;
+}
+
+function toRunSummary(row: RunRow): RunSummary {
+  return {
+    id: row.id,
+    planId: row.plan_id,
+    listRef: row.list_ref,
+    status: row.status,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    commitHash: row.commit_hash,
+  };
+}
+
+/** A run by id from `main`'s head, or null. */
+export async function getRun(runId: string): Promise<RunSummary | null> {
+  const [row] = await select<RunRow>(`SELECT ${RUN_COLUMNS} FROM enrichment_runs WHERE id = ?`, [runId]);
+  return row ? toRunSummary(row) : null;
+}
+
+async function requireRun(runId: string): Promise<RunSummary> {
+  const run = await getRun(runId);
+  if (!run) throw new RunNotFoundError(runId);
+  return run;
+}
+
+/**
+ * The run before `runId` on the same list: the latest `completed` run with
+ * an equal `list_ref` and a commit, that started earlier. Null when there is
+ * none; {@link RunNotFoundError} when `runId` is unknown.
+ *
+ * Only `completed` runs are a default baseline: a cancelled (`partial`) run
+ * that covered 3 of 100 contacts would show every field of the other 97 as
+ * added. `partial` and `failed` runs can still be compared by id
+ * ({@link diffRuns}, `?against=` on the route).
+ *
+ * `started_at` has one-second resolution, so two runs started in the same
+ * second are ordered by id: one of them is the other's predecessor, never
+ * both.
+ */
+export async function previousRunFor(runId: string): Promise<RunSummary | null> {
+  const run = await requireRun(runId);
+  const [row] = await select<RunRow>(
+    `SELECT ${RUN_COLUMNS} FROM enrichment_runs
+     WHERE list_ref = ? AND id <> ? AND status = ? AND commit_hash IS NOT NULL
+       AND (started_at < ? OR (started_at = ? AND id < ?))
+     ORDER BY started_at DESC, id DESC
+     LIMIT 1`,
+    [run.listRef, run.id, 'completed' satisfies FinishStatus, run.startedAt, run.startedAt, run.id]
+  );
+  return row ? toRunSummary(row) : null;
+}
+
+/** The join key of one value: the contact (case-insensitive) and the field. */
+function valueKey(email: string, field: string): string {
+  return `${email.trim().toLowerCase()}\u0000${field}`;
+}
+
+/** `DECIMAL` arrives as a string from `mysql2`. */
+function numberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+interface EarlierValue {
+  id: string;
+  contact_email: string;
+  field: string;
+  value: string | null;
+}
+
+interface LaterValue extends EarlierValue {
+  confidence: unknown;
+  url: string | null;
+  quote: string | null;
+}
+
+/**
+ * The values that differ between two runs: added, changed and removed
+ * values, matched on `(contact_email, field)`. Values equal in both runs
+ * are left out. Each run is read `AS OF` its own commit, and the later
+ * run's evidence `AS OF` the later commit, so the answer does not move when
+ * `main` does.
+ *
+ * A list that repeats a contact records the same field more than once in a
+ * run; the first row by id is compared and the rest are ignored.
+ *
+ * Throws {@link RunNotFoundError} for an unknown run,
+ * {@link RunsNotComparableError} for the same run twice or runs of different
+ * lists, and {@link RunNotCommittedError} for a run with no commit.
+ */
+export async function diffRuns(
+  fromRunId: string,
+  toRunId: string
+): Promise<{ from: RunSummary; to: RunSummary; changes: RunChange[] }> {
+  const from = await requireRun(fromRunId);
+  const to = await requireRun(toRunId);
+  if (from.id === to.id) throw new RunsNotComparableError(`Run ${to.id} cannot be diffed against itself`);
+  if (from.listRef !== to.listRef) {
+    throw new RunsNotComparableError(`Runs ${from.id} and ${to.id} are of different lists`);
+  }
+  if (!from.commitHash) throw new RunNotCommittedError(from.id);
+  if (!to.commitHash) throw new RunNotCommittedError(to.id);
+
+  // `AS OF ?` relies on mysql2's client-side interpolation (`query`, which
+  // `select` uses): a server-side prepared `execute` of the same SQL crashes
+  // Dolt 2.1.8's planner and drops the connection.
+  const before = await select<EarlierValue>(
+    'SELECT id, contact_email, field, value FROM enrichments AS OF ? WHERE run_id = ? ORDER BY id',
+    [from.commitHash, from.id]
+  );
+  const after = await select<LaterValue>(
+    `SELECT e.id, e.contact_email, e.field, e.value, e.confidence, v.url, v.quote
+     FROM enrichments AS OF ? e
+     LEFT JOIN evidence AS OF ? v ON v.enrichment_id = e.id
+     WHERE e.run_id = ?
+     ORDER BY e.id, v.id`,
+    [to.commitHash, to.commitHash, to.id]
+  );
+
+  const earlier = new Map<string, EarlierValue>();
+  for (const row of before) {
+    const key = valueKey(row.contact_email, row.field);
+    if (!earlier.has(key)) earlier.set(key, row);
+  }
+
+  // One entry per key: its first enrichment row, with every evidence row of it.
+  const later = new Map<string, { row: LaterValue; sources: RunChange['sources'] }>();
+  for (const row of after) {
+    const key = valueKey(row.contact_email, row.field);
+    let entry = later.get(key);
+    if (!entry) {
+      entry = { row, sources: [] };
+      later.set(key, entry);
+    }
+    if (entry.row.id === row.id && row.url) entry.sources.push({ url: row.url, quote: row.quote });
+  }
+
+  const changes: RunChange[] = [];
+  for (const [key, { row, sources }] of later) {
+    const previous = earlier.get(key);
+    if (previous && previous.value === row.value) continue;
+    changes.push({
+      contactEmail: row.contact_email,
+      field: row.field,
+      change: previous ? 'changed' : 'added',
+      from: previous ? previous.value : null,
+      to: row.value,
+      confidence: numberOrNull(row.confidence),
+      sources,
+    });
+  }
+  for (const [key, row] of earlier) {
+    if (later.has(key)) continue;
+    changes.push({
+      contactEmail: row.contact_email,
+      field: row.field,
+      change: 'removed',
+      from: row.value,
+      to: null,
+      confidence: null,
+      sources: [],
+    });
+  }
+
+  return { from, to, changes };
 }

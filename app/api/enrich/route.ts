@@ -299,8 +299,10 @@ export async function POST(request: NextRequest) {
           // `partial`, with the rows that finished.
           await recording?.finish(cancelled ? 'partial' : 'completed');
 
-          // Send completion
-          if (!cancelled) send({ type: 'complete' });
+          // Send completion. `runId`: the committed run every row of this
+          // session belongs to, for `GET /api/runs/:id/diff`; null when the
+          // run was not recorded.
+          if (!cancelled) send({ type: 'complete', runId: recording?.committedRunId ?? null });
         } catch (error) {
           // A no-op when the run already finished or was never started.
           await recording?.finish(abortController.signal.aborted ? 'partial' : 'failed');

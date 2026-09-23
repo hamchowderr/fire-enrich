@@ -192,6 +192,8 @@ describe('POST /api/enrich', () => {
     expect(types.indexOf('result')).toBeGreaterThan(types.lastIndexOf('agent_progress'));
     expect(types.at(-1)).toBe('complete');
     expect(types).not.toContain('error');
+    // Dolt is off here, so no run was recorded.
+    expect(events.at(-1)).toEqual({ type: 'complete', runId: null });
 
     const progress = events.filter((event) => event.type === 'agent_progress');
     const messages = progress.map((event) => event.message);
@@ -375,8 +377,20 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
       expect(runs.finishRun).toHaveBeenCalledWith('run_1', 'completed');
       expect(timeline.indexOf('complete')).toBeGreaterThan(timeline.indexOf('finish:end'));
       expect(warnings(events)).toEqual([]);
+      // `complete` names the committed run the rows belong to.
+      expect(events.at(-1)).toEqual({ type: 'complete', runId: 'run_1' });
     }
   );
+
+  it('streams `runId: null` on `complete` when the run commit fails', { timeout: 120_000 }, async () => {
+    runs.doltConfigured.mockReturnValue(true);
+    runs.finishRun.mockRejectedValue(new Error('merge conflicted'));
+
+    const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]));
+
+    expect(runs.finishRun).toHaveBeenCalledOnce();
+    expect(events.at(-1)).toEqual({ type: 'complete', runId: null });
+  });
 
   it('does not start a run before the plan resolves: a cancel during planning records nothing', { timeout: 30_000 }, async () => {
     runs.doltConfigured.mockReturnValue(true);
@@ -453,7 +467,7 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
     expect(JSON.stringify(events)).not.toMatch(/ECONNREFUSED|3316/);
     const results = events.filter((event) => event.type === 'result') as unknown as Array<{ result: { status: string } }>;
     expect(results.map(({ result }) => result.status)).toEqual(['completed', 'completed']);
-    expect(events.at(-1)?.type).toBe('complete');
+    expect(events.at(-1)).toEqual({ type: 'complete', runId: null });
     expect(runs.recordRow).not.toHaveBeenCalled();
     expect(runs.finishRun).not.toHaveBeenCalled();
   });
