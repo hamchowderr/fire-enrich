@@ -5,6 +5,7 @@ import { Mastra } from '@mastra/core';
 import { LibSQLStore } from '@mastra/libsql';
 
 import { browserAgent } from './agents/browser';
+import { chatAgent } from './agents/chat';
 import { identifyAgent } from './agents/identify';
 import { plannerAgent } from './agents/planner';
 import { researchAgent } from './agents/research';
@@ -87,6 +88,8 @@ function createMastra() {
       planner: plannerAgent,
       identify: identifyAgent,
       research: researchAgent,
+      /** Answers the chat panel: from the enriched table, or from the web. */
+      chat: chatAgent,
     },
     workflows: {
       enrichRow: enrichRowWorkflow,

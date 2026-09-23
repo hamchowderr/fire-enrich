@@ -1,11 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { FirecrawlService } from '@/lib/services/firecrawl';
-import { OpenAIService } from '@/lib/services/openai';
+
+import { mastra } from '@/lib/mastra';
+import { chatContextMessage, type ChatTableContext } from '@/lib/mastra/agents/chat';
 
 export const runtime = 'nodejs';
 
+/** Steps the chat agent may take: a search, a scrape, and the answer, with room to retry one. */
+const CHAT_MAX_STEPS = 6;
+
+/** Search results announced as "Reading …" per search call. */
+const READ_LINES_PER_SEARCH = 3;
+
 // Store active queries
 const activeQueries = new Map<string, AbortController>();
+
+type HistoryTurn = { role: 'user'; content: string } | { role: 'assistant'; content: string };
+
+interface ChatSource {
+  url: string;
+  title?: string;
+}
+
+interface SearchToolResult {
+  results?: Array<{ url?: string; title?: string }>;
+}
+
+interface ScrapeToolResult {
+  url?: string;
+  title?: string;
+  blocked?: boolean;
+}
+
+/** The panel's recent turns, kept to well-formed user and assistant messages. */
+function historyMessages(history: unknown): HistoryTurn[] {
+  if (!Array.isArray(history)) return [];
+
+  return history.filter(
+    (turn): turn is HistoryTurn =>
+      (turn?.role === 'user' || turn?.role === 'assistant') &&
+      typeof turn?.content === 'string' &&
+      turn.content.trim().length > 0
+  );
+}
+
+function hostname(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,11 +63,9 @@ export async function POST(request: NextRequest) {
     }
 
     // API keys come from the environment only. They are injected from the
-    // secrets manager at runtime and are never read from the request.
-    const gatewayApiKey = process.env.AI_GATEWAY_API_KEY;
-    const firecrawlApiKey = process.env.FIRECRAWL_API_KEY;
-
-    if (!gatewayApiKey || !firecrawlApiKey) {
+    // secrets manager at runtime and are never read from the request. The
+    // agent's model and tools read them from the environment themselves.
+    if (!process.env.AI_GATEWAY_API_KEY || !process.env.FIRECRAWL_API_KEY) {
       return NextResponse.json(
         { error: 'Missing API keys' },
         { status: 500 }
@@ -35,227 +77,102 @@ export async function POST(request: NextRequest) {
     const queryId = sessionId || `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     activeQueries.set(queryId, abortController);
 
-    const firecrawl = new FirecrawlService(firecrawlApiKey);
-    const openai = new OpenAIService(gatewayApiKey);
+    const agent = mastra.getAgent('chat');
+    const messages = [
+      ...historyMessages(conversationHistory),
+      { role: 'user' as const, content: chatContextMessage(question, (context ?? {}) as ChatTableContext) },
+    ];
 
     // Create streaming response
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
-        try {
-          // Step 1: Check table data first
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: 'Checking enriched table data...',
-                step: 'table_check'
-              })}\n\n`
-            )
-          );
-
-          // Try to answer from table data first
-          const tableData = context?.tableData || '';
-          if (tableData && tableData.trim().length > 0) {
-            console.log('[Chat API] Checking table data, length:', tableData.length);
-            const tableAnswer = await openai.answerFromTableData(question, tableData, conversationHistory);
-
-            if (tableAnswer && tableAnswer.found) {
-              console.log('[Chat API] Answer found in table data');
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: 'status',
-                    message: '✓ Found answer in enriched data',
-                    step: 'table_found'
-                  })}\n\n`
-                )
-              );
-
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: 'response',
-                    message: tableAnswer.answer,
-                    source: { type: 'table', title: 'Enriched Data Table' }
-                  })}\n\n`
-                )
-              );
-
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({ type: 'complete' })}\n\n`
-                )
-              );
-              return;
-            } else {
-              console.log('[Chat API] Answer not found in table, searching web');
-            }
-          } else {
-            console.log('[Chat API] No table data available, searching web');
+        let closed = false;
+        const send = (data: unknown) => {
+          if (closed) return;
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+          } catch {
+            closed = true;
           }
+        };
 
-          // Step 2: If not found in table, search the web
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: 'Searching the web for more information...',
-                step: 'web_search'
-              })}\n\n`
-            )
-          );
+        try {
+          send({ type: 'status', message: 'Checking enriched table data...', step: 'table_check' });
 
-          const searchQuery = await openai.generateSearchQuery(question, {
-            ...context,
-            conversationHistory
+          const output = await agent.stream(messages, {
+            maxSteps: CHAT_MAX_STEPS,
+            abortSignal: abortController.signal,
           });
 
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: `Searching for: "${searchQuery}"`,
-                step: 'search'
-              })}\n\n`
-            )
-          );
+          // Pages the agent read, in order. The answer cites the last one: a
+          // scrape follows the search that found its url.
+          const read: ChatSource[] = [];
 
-          // Step 2: Search for relevant sources
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: 'Executing web search...',
-                step: 'searching'
-              })}\n\n`
-            )
-          );
+          for await (const chunk of output.fullStream) {
+            if (chunk.type === 'tool-call') {
+              const args = (chunk.payload.args ?? {}) as { query?: string; url?: string };
 
-          const searchResults = await firecrawl.search(searchQuery, { limit: 5 });
+              if (chunk.payload.toolName === 'search' && args.query) {
+                send({ type: 'status', message: `Searching the web for "${args.query}"...`, step: 'search' });
+              }
+            } else if (chunk.type === 'tool-result') {
+              if (chunk.payload.isError) continue;
 
-          if (searchResults.length === 0) {
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  type: 'response',
-                  message: "I couldn't find any relevant information. Could you rephrase your question?"
-                })}\n\n`
-              )
-            );
-            controller.close();
-            return;
+              if (chunk.payload.toolName === 'search') {
+                const results = ((chunk.payload.result ?? {}) as SearchToolResult).results ?? [];
+                const found = results
+                  .filter((result): result is ChatSource => typeof result.url === 'string' && result.url.length > 0)
+                  .map(({ url, title }) => ({ url, title: title || undefined }));
+
+                send({ type: 'status', message: `Found ${found.length} sources`, step: 'select' });
+                for (const source of found.slice(0, READ_LINES_PER_SEARCH)) {
+                  send({ type: 'status', message: `Reading ${source.url}`, step: 'scrape', source });
+                }
+                read.push(...found.slice(0, 1));
+              } else if (chunk.payload.toolName === 'scrape') {
+                const result = (chunk.payload.result ?? {}) as ScrapeToolResult;
+                if (!result.url || result.blocked) continue;
+
+                const source = { url: result.url, title: result.title || undefined };
+                send({ type: 'status', message: `Reading ${source.url}`, step: 'scrape', source });
+                read.push(source);
+              }
+            } else if (chunk.type === 'error') {
+              throw chunk.payload.error instanceof Error
+                ? chunk.payload.error
+                : new Error(String(chunk.payload.error ?? 'The chat agent failed'));
+            }
           }
 
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: `Found ${searchResults.length} sources`,
-                step: 'select',
-                sources: searchResults.map(r => ({ url: r.url, title: r.title }))
-              })}\n\n`
-            )
-          );
+          // Stopped by DELETE: the panel has already moved on.
+          if (abortController.signal.aborted) return;
 
-          // Step 3: Evaluating sources
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: 'Evaluating source relevance...',
-                step: 'evaluating'
-              })}\n\n`
-            )
-          );
+          // The last step's text is the answer; earlier steps may carry a line
+          // the model wrote before calling a tool.
+          const steps = await output.steps;
+          const answer = (steps.at(-1)?.text ?? (await output.text)).trim();
+          const cited = read.at(-1);
 
-          const bestSource = await openai.selectBestSource(searchResults, question);
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: `Selected: ${bestSource.title || new URL(bestSource.url).hostname}`,
-                step: 'selected',
-                source: { url: bestSource.url, title: bestSource.title }
-              })}\n\n`
-            )
-          );
-
-          // Step 4: Reading content
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: `Reading content from ${new URL(bestSource.url).hostname}...`,
-                step: 'scrape',
-                source: { url: bestSource.url, title: bestSource.title }
-              })}\n\n`
-            )
-          );
-
-          const scrapedData = await firecrawl.scrapeUrl(bestSource.url);
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: 'Extracting relevant information...',
-                step: 'extracting'
-              })}\n\n`
-            )
-          );
-
-          // Step 5: Analyzing and formulating response
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'status',
-                message: 'Synthesizing answer...',
-                step: 'analyze'
-              })}\n\n`
-            )
-          );
-
-          // Step 5: Generate conversational response
-          const response = await openai.generateConversationalResponse(
-            question,
-            scrapedData.data?.markdown || '',
-            {
-              ...context,
-              conversationHistory
-            },
-            bestSource.url
-          );
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'response',
-                message: response,
-                source: { url: bestSource.url, title: bestSource.title }
-              })}\n\n`
-            )
-          );
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({ type: 'complete' })}\n\n`
-            )
-          );
-
+          send({
+            type: 'response',
+            message: answer || "I couldn't find an answer to that. Could you rephrase your question?",
+            source: cited
+              ? { url: cited.url, title: cited.title ?? hostname(cited.url) }
+              : { type: 'table', title: 'Enriched Data Table' },
+          });
+          send({ type: 'complete' });
         } catch (error) {
+          if (abortController.signal.aborted) return;
+
           console.error('[Chat API] Error:', error);
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: 'error',
-                message: error instanceof Error ? error.message : 'An error occurred'
-              })}\n\n`
-            )
-          );
+          send({
+            type: 'error',
+            message: error instanceof Error ? error.message : 'An error occurred',
+          });
         } finally {
           activeQueries.delete(queryId);
+          closed = true;
           controller.close();
         }
       },
