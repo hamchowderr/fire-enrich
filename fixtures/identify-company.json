@@ -1,0 +1,34 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Email to identify: hello@firecrawl.dev",
+        "systemMessage": "You identify the company",
+        "hasToolResult": false,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_identify_search",
+            "name": "search",
+            "arguments": {
+              "query": "firecrawl.dev company"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Email to identify: hello@firecrawl.dev",
+        "systemMessage": "You identify the company",
+        "hasToolResult": true,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.95}"
+      }
+    }
+  ]
+}

@@ -40,10 +40,8 @@ const RETRYABLE_MESSAGES = ['network error', 'server is unreachable'];
 /**
  * Discriminator on every progress event written to the tool stream.
  *
- * Module-local until something outside this directory reads it. The SSE adapter
- * that renders these as source lines is the consumer that will want it
- * exported; exporting it before that consumer exists is dead code the gate
- * rightly rejects.
+ * The enrich-row workflow reads it to forward these events from the agent's
+ * stream onto its own step stream, where the SSE adapter picks them up.
  */
 const FIRECRAWL_PROGRESS_TYPE = 'firecrawl-progress';
 
@@ -58,11 +56,27 @@ export interface ProgressWriter {
   write(data: unknown): Promise<void>;
 }
 
-/** Shape written for every Firecrawl call so an SSE adapter can render sources. */
-interface FirecrawlProgressEvent {
+/**
+ * Shape written for every Firecrawl call so an SSE adapter can render sources.
+ *
+ * `groupId` is never set by a tool: the enrich-row workflow adds it when it
+ * forwards the event, so a consumer can tell which research group read what.
+ */
+export interface FirecrawlProgressEvent {
   type: typeof FIRECRAWL_PROGRESS_TYPE;
   message: string;
   sourceUrl?: string;
+  groupId?: string;
+}
+
+/** Whether `value` is a {@link FirecrawlProgressEvent}. */
+export function isFirecrawlProgressEvent(value: unknown): value is FirecrawlProgressEvent {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { type?: unknown }).type === FIRECRAWL_PROGRESS_TYPE &&
+    typeof (value as { message?: unknown }).message === 'string'
+  );
 }
 
 /**

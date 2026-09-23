@@ -1,0 +1,14 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Collect these fields for a company.",
+        "systemMessage": "uses a generic profile",
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"fields\":[{\"name\":\"support_channels\",\"displayName\":\"Support Channels\",\"description\":\"Channels offered for customer support.\",\"type\":\"array\",\"examples\":[\"email\",\"live chat\"],\"strategy\":\"search\"},{\"name\":\"pricing_model\",\"displayName\":\"Pricing Model\",\"description\":\"How the company charges.\",\"type\":\"string\",\"examples\":[\"per seat\"],\"strategy\":\"browser\"},{\"name\":\"headquarters_city\",\"displayName\":\"Headquarters City\",\"description\":\"City of the head office.\",\"type\":\"string\",\"examples\":[],\"strategy\":\"search\"}],\"groups\":[{\"id\":\"support\",\"label\":\"Support setup\",\"fieldNames\":[\"support_channels\",\"headquarters_city\"],\"strategy\":\"search\",\"queries\":[\"{company} contact support\",\"site:{domain} help\"],\"preferredSources\":[\"the company help centre\"],\"instructions\":\"Use the company help and contact pages.\"},{\"id\":\"pricing\",\"label\":\"Pricing\",\"fieldNames\":[\"pricing_model\"],\"strategy\":\"browser\",\"queries\":[\"site:{domain} pricing\"],\"preferredSources\":[\"the pricing page\"],\"instructions\":\"Read the current pricing page.\"}],\"interpretation\":\"Plans the requested support and pricing fields; no stored profile was available, so this uses a generic profile.\"}"
+      }
+    }
+  ]
+}
