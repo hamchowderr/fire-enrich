@@ -240,6 +240,17 @@ export class RunRecording {
   private warned = false;
   private finished = false;
 
+  private committed: string | null = null;
+
+  /**
+   * The run's id once {@link finish} has committed it, else null. The route
+   * streams it on `complete` / `cancelled` so the table can ask
+   * `GET /api/runs/:id/diff` what changed since the list's previous run.
+   */
+  get committedRunId(): string | null {
+    return this.committed;
+  }
+
   /** `startFailed`: the start already failed, and {@link startRunRecording} logged why. */
   constructor(
     private readonly runId: string | null,
@@ -292,7 +303,9 @@ export class RunRecording {
       return null;
     }
     try {
-      return await finishRun(this.runId, status);
+      const hash = await finishRun(this.runId, status);
+      if (hash) this.committed = this.runId;
+      return hash;
     } catch (error) {
       this.fail(error, 0);
       return null;
