@@ -6,8 +6,11 @@ import { ENRICHMENT_CONFIG } from '@/lib/config/enrichment';
 import {
   enrichRowWithMastra,
   resolveSessionPlan,
+  startRunRecording,
   type CancellableRun,
+  type RunRecording,
 } from '@/lib/mastra/enrich-adapter';
+import { listRefFor } from '@/lib/runs';
 
 // Use Node.js runtime for better compatibility
 export const runtime = 'nodejs';
@@ -47,7 +50,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body: EnrichmentRequest = await request.json();
+    // `listRef` (optional): how the caller names the list, e.g. the CSV file
+    // name. Without it the run is recorded under a fingerprint of the emails.
+    const body: EnrichmentRequest & { listRef?: unknown } = await request.json();
     const { rows, fields, emailColumn, nameColumn } = body;
 
     if (!rows || rows.length === 0) {
@@ -120,6 +125,10 @@ export async function POST(request: NextRequest) {
           }
         };
 
+        // The session's run in Dolt (Mastra engine only). Never throws: with
+        // storage unavailable it says so once in the stream and rows go on.
+        let recording: RunRecording | null = null;
+
         try {
           // Send session ID
           send({ type: 'session', sessionId });
@@ -143,6 +152,15 @@ export async function POST(request: NextRequest) {
           const mastraPlan = mastraEngine
             ? await resolveSessionPlan(fields, abortController.signal)
             : null;
+
+          if (mastraPlan) {
+            recording = await startRunRecording({
+              planId: mastraPlan.planId,
+              listRef: listRefFor(body.listRef, rows, emailColumn),
+              warn: (rowIndex, line) =>
+                send({ type: 'agent_progress', rowIndex, message: line.message, messageType: line.messageType }),
+            });
+          }
 
           const progress =
             (rowIndex: number) =>
@@ -210,6 +228,7 @@ export async function POST(request: NextRequest) {
                       onProgress: (line) => onProgress(line.message, line.messageType, line.sourceUrl),
                       runs: session.runs,
                       signal: abortController.signal,
+                      recording: recording ?? undefined,
                     })
                   : {
                       rowIndex: i,
@@ -315,9 +334,16 @@ export async function POST(request: NextRequest) {
             ]);
           }
 
+          // Commit the run before the stream ends: a cancelled run is
+          // `partial`, with the rows that finished.
+          await recording?.finish(cancelled ? 'partial' : 'completed');
+
           // Send completion
           if (!cancelled) send({ type: 'complete' });
         } catch (error) {
+          // A no-op when the run already finished or was never started.
+          await recording?.finish(abortController.signal.aborted ? 'partial' : 'failed');
+
           // A DELETE during plan resolution rejects the planner call on the
           // abort signal; that is a cancel, not a failure.
           if (abortController.signal.aborted) {
