@@ -24,12 +24,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 const {
   resolveSessionPlanMock,
+  startRunRecordingMock,
   enrichRowMock,
   chatStreamMock,
   firecrawlSdkCtor,
   scrapeMock,
 } = vi.hoisted(() => ({
   resolveSessionPlanMock: vi.fn(),
+  startRunRecordingMock: vi.fn(),
   enrichRowMock: vi.fn(),
   chatStreamMock: vi.fn(),
   firecrawlSdkCtor: vi.fn(),
@@ -38,6 +40,7 @@ const {
 
 vi.mock('@/lib/mastra/enrich-adapter', () => ({
   resolveSessionPlan: resolveSessionPlanMock,
+  startRunRecording: startRunRecordingMock,
   enrichRowWithMastra: enrichRowMock,
 }));
 
@@ -123,7 +126,7 @@ afterEach(() => {
     else process.env[key] = saved[key];
   }
   vi.restoreAllMocks();
-  for (const mock of [resolveSessionPlanMock, enrichRowMock, chatStreamMock, firecrawlSdkCtor, scrapeMock]) {
+  for (const mock of [resolveSessionPlanMock, startRunRecordingMock, enrichRowMock, chatStreamMock, firecrawlSdkCtor, scrapeMock]) {
     mock.mockReset();
   }
 });
@@ -153,6 +156,7 @@ describe('POST /api/enrich', () => {
 
   it('proceeds with the environment keys and never the header values', async () => {
     resolveSessionPlanMock.mockResolvedValue({ plan: { fields: [], groups: [] }, fields: ENRICH_BODY.fields });
+    startRunRecordingMock.mockResolvedValue({ finish: vi.fn() });
     enrichRowMock.mockResolvedValue({
       rowIndex: 0,
       originalData: ENRICH_BODY.rows[0],
