@@ -23,6 +23,8 @@ bd close <id>         # Complete work
 bd dolt push          # Push beads data to remote
 ```
 
+The Fire Enrich Board artifact is built and republished by the braynee `board` skill (`/braynee:board`); the repo has no board script of its own.
+
 ## Non-Interactive Shell Commands
 
 **ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
