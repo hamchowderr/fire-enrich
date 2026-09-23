@@ -69,6 +69,7 @@ npm run fallow:gate    # dead-code gate: fails on any finding not in fallow.base
 npm run test:ai        # starts AIMock on :4010, runs vitest, stops it
 npm test               # vitest only; tests/routes/* need `npm run aimock` running
 npm run build          # next build
+npm run test:e2e       # Playwright smoke against the built app; CI runs it after the build with E2E_SKIP_BUILD=1
 ```
 
 Tests never touch a real model, Firecrawl, or database: `tests/setup.ts` forces
