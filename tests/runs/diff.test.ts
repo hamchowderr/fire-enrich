@@ -202,6 +202,25 @@ describe('diffRuns', () => {
     expect(fake.find(/FROM enrichments/)).toEqual([]);
   });
 
+  it('throws RunsNotComparableError for the same run twice or runs of different lists', async () => {
+    runs.run_c = run('run_c', { list_ref: 'contacts.csv' });
+    const { diffRuns } = await loadRuns();
+
+    await expect(diffRuns('run_b', 'run_b')).rejects.toMatchObject({ name: 'RunsNotComparableError' });
+    await expect(diffRuns('run_c', 'run_b')).rejects.toMatchObject({
+      name: 'RunsNotComparableError',
+      message: 'Runs run_c and run_b are of different lists',
+    });
+    expect(fake.find(/FROM enrichments/)).toEqual([]);
+  });
+
+  it('diffs a partial run by id: only the default baseline is limited to completed runs', async () => {
+    runs.run_a = run('run_a', { status: 'partial' });
+    const { diffRuns } = await loadRuns();
+
+    expect((await diffRuns('run_a', 'run_b')).changes).toHaveLength(3);
+  });
+
   it('throws RunNotCommittedError for a run with no commit', async () => {
     runs.run_b = run('run_b', { commit_hash: null, status: 'running' });
     const { diffRuns } = await loadRuns();
@@ -212,7 +231,7 @@ describe('diffRuns', () => {
 });
 
 describe('previousRunFor', () => {
-  it('asks for the latest earlier committed, terminal run with the same list_ref', async () => {
+  it('asks for the latest earlier committed, completed run with the same list_ref', async () => {
     const { previousRunFor } = await loadRuns();
 
     const found = await previousRunFor('run_b');
@@ -229,15 +248,15 @@ describe('previousRunFor', () => {
     const [lookup] = fake.find(/WHERE list_ref = \?/);
     expect(lookup.sql.replace(/\s+/g, ' ').trim()).toBe(
       'SELECT id, plan_id, list_ref, status, started_at, finished_at, commit_hash FROM enrichment_runs ' +
-        'WHERE list_ref = ? AND id <> ? AND status IN (?, ?, ?) AND commit_hash IS NOT NULL ' +
+        'WHERE list_ref = ? AND id <> ? AND status = ? AND commit_hash IS NOT NULL ' +
         'AND (started_at < ? OR (started_at = ? AND id < ?)) ORDER BY started_at DESC, id DESC LIMIT 1'
     );
+    // Only a completed run is a default baseline; partial and failed runs are
+    // reachable by id (`?against=`).
     expect(lookup.params).toEqual([
       'emails:sha256:0123456789abcdef (2 rows)',
       'run_b',
       'completed',
-      'partial',
-      'failed',
       '2026-09-02 10:00:00',
       '2026-09-02 10:00:00',
       'run_b',
@@ -284,7 +303,24 @@ describe('GET /api/runs/:id/diff', () => {
     expect(body).toEqual({ error: 'No run with id missing' });
   });
 
-  it('answers 409 for a run with no commit yet', async () => {
+  it('answers 400 when `against` is the run itself', async () => {
+    const { status, body } = await getDiff('run_b', '?against=run_b');
+
+    expect(status).toBe(400);
+    expect(body).toEqual({ error: 'Run run_b cannot be diffed against itself' });
+  });
+
+  it('answers 400 when `against` is a run of a different list', async () => {
+    runs.run_c = run('run_c', { list_ref: 'contacts.csv' });
+
+    const { status, body } = await getDiff('run_b', '?against=run_c');
+
+    expect(status).toBe(400);
+    expect(body).toEqual({ error: 'Runs run_c and run_b are of different lists' });
+    expect(fake.find(/FROM enrichments/)).toEqual([]);
+  });
+
+  it('answers 409 for a run row with no commit', async () => {
     runs.run_b = run('run_b', { commit_hash: null });
 
     const { status } = await getDiff('run_b', '?against=run_a');

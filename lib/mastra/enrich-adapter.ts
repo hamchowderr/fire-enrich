@@ -244,7 +244,8 @@ export class RunRecording {
 
   /**
    * The run's id once {@link finish} has committed it, else null. The route
-   * streams it on `complete` / `cancelled` so the table can ask
+   * streams it on `complete` (not on `cancelled`, which is sent before the
+   * run is committed) so the table can ask
    * `GET /api/runs/:id/diff` what changed since the list's previous run.
    */
   get committedRunId(): string | null {

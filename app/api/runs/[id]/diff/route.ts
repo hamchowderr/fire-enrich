@@ -7,6 +7,7 @@ import {
   previousRunFor,
   RunNotCommittedError,
   RunNotFoundError,
+  RunsNotComparableError,
 } from '@/lib/runs';
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -20,8 +21,9 @@ type RouteContext = { params: Promise<{ id: string }> };
  * the first run of its list; `changes` is then empty. An empty `changes` with
  * a `predecessor` means nothing changed.
  *
- * 404 for an unknown run on either side, 409 for a run with no commit yet,
- * 503 when Dolt is not configured.
+ * 400 when `against` is `:id` itself or a run of a different list, 404 for an
+ * unknown run on either side, 409 for a run row with no commit (only after a
+ * hand edit), 503 when Dolt is not configured.
  */
 export async function GET(request: NextRequest, context: RouteContext) {
   const unconfigured = requireDolt('Run diffs');
@@ -42,6 +44,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ from, to, predecessor: from.id, changes });
   } catch (error) {
     if (error instanceof RunNotFoundError) return notFound(error.runId, 'run');
+    if (error instanceof RunsNotComparableError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof RunNotCommittedError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

@@ -532,7 +532,11 @@ export class RunNotFoundError extends Error {
   }
 }
 
-/** A run with no commit yet (in flight, or committed but never merged). */
+/**
+ * A run row on `main` with no `commit_hash`. A run in flight or never merged
+ * has no row on `main` at all (that is a {@link RunNotFoundError}), so this
+ * only happens after a hand edit of the row; kept as a defensive branch.
+ */
 export class RunNotCommittedError extends Error {
   constructor(readonly runId: string) {
     super(`Run ${runId} has no commit to read`);
@@ -540,8 +544,13 @@ export class RunNotCommittedError extends Error {
   }
 }
 
-/** Statuses a run stops in; only these runs have results worth comparing. */
-const TERMINAL_STATUSES: readonly FinishStatus[] = ['completed', 'partial', 'failed'];
+/** Two runs that cannot be diffed: the same run twice, or runs of different lists. */
+export class RunsNotComparableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RunsNotComparableError';
+  }
+}
 
 const RUN_COLUMNS = 'id, plan_id, list_ref, status, started_at, finished_at, commit_hash';
 
@@ -580,9 +589,14 @@ async function requireRun(runId: string): Promise<RunSummary> {
 }
 
 /**
- * The run before `runId` on the same list: the latest run with an equal
- * `list_ref`, a terminal status and a commit, that started earlier. Null
- * when there is none; {@link RunNotFoundError} when `runId` is unknown.
+ * The run before `runId` on the same list: the latest `completed` run with
+ * an equal `list_ref` and a commit, that started earlier. Null when there is
+ * none; {@link RunNotFoundError} when `runId` is unknown.
+ *
+ * Only `completed` runs are a default baseline: a cancelled (`partial`) run
+ * that covered 3 of 100 contacts would show every field of the other 97 as
+ * added. `partial` and `failed` runs can still be compared by id
+ * ({@link diffRuns}, `?against=` on the route).
  *
  * `started_at` has one-second resolution, so two runs started in the same
  * second are ordered by id: one of them is the other's predecessor, never
@@ -592,11 +606,11 @@ export async function previousRunFor(runId: string): Promise<RunSummary | null> 
   const run = await requireRun(runId);
   const [row] = await select<RunRow>(
     `SELECT ${RUN_COLUMNS} FROM enrichment_runs
-     WHERE list_ref = ? AND id <> ? AND status IN (?, ?, ?) AND commit_hash IS NOT NULL
+     WHERE list_ref = ? AND id <> ? AND status = ? AND commit_hash IS NOT NULL
        AND (started_at < ? OR (started_at = ? AND id < ?))
      ORDER BY started_at DESC, id DESC
      LIMIT 1`,
-    [run.listRef, run.id, ...TERMINAL_STATUSES, run.startedAt, run.startedAt, run.id]
+    [run.listRef, run.id, 'completed' satisfies FinishStatus, run.startedAt, run.startedAt, run.id]
   );
   return row ? toRunSummary(row) : null;
 }
@@ -636,8 +650,9 @@ interface LaterValue extends EarlierValue {
  * A list that repeats a contact records the same field more than once in a
  * run; the first row by id is compared and the rest are ignored.
  *
- * Throws {@link RunNotFoundError} for an unknown run and
- * {@link RunNotCommittedError} for a run with no commit.
+ * Throws {@link RunNotFoundError} for an unknown run,
+ * {@link RunsNotComparableError} for the same run twice or runs of different
+ * lists, and {@link RunNotCommittedError} for a run with no commit.
  */
 export async function diffRuns(
   fromRunId: string,
@@ -645,9 +660,16 @@ export async function diffRuns(
 ): Promise<{ from: RunSummary; to: RunSummary; changes: RunChange[] }> {
   const from = await requireRun(fromRunId);
   const to = await requireRun(toRunId);
+  if (from.id === to.id) throw new RunsNotComparableError(`Run ${to.id} cannot be diffed against itself`);
+  if (from.listRef !== to.listRef) {
+    throw new RunsNotComparableError(`Runs ${from.id} and ${to.id} are of different lists`);
+  }
   if (!from.commitHash) throw new RunNotCommittedError(from.id);
   if (!to.commitHash) throw new RunNotCommittedError(to.id);
 
+  // `AS OF ?` relies on mysql2's client-side interpolation (`query`, which
+  // `select` uses): a server-side prepared `execute` of the same SQL crashes
+  // Dolt 2.1.8's planner and drops the connection.
   const before = await select<EarlierValue>(
     'SELECT id, contact_email, field, value FROM enrichments AS OF ? WHERE run_id = ? ORDER BY id',
     [from.commitHash, from.id]
