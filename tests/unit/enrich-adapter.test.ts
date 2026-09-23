@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { filterCitations, translateChunk, VisitedUrls } from '@/lib/mastra/enrich-adapter';
+import { mastra } from '@/lib/mastra';
+import {
+  enrichRowWithMastra,
+  filterCitations,
+  translateChunk,
+  VisitedUrls,
+  type RunRecording,
+} from '@/lib/mastra/enrich-adapter';
 import type { EnrichmentResult } from '@/lib/types';
 
 const EMAIL = 'hello@acme.example';
@@ -109,5 +116,97 @@ describe('filterCitations', () => {
 
   it('drops a field left with no read citation', () => {
     expect(filterCitations({ f: enrichment(['https://unread.example/']) }, new VisitedUrls())).toEqual({});
+  });
+});
+
+describe('enrichRowWithMastra recording', () => {
+  const READ = 'https://read.example/';
+  const UNREAD = 'https://unread.example/';
+
+  const cited = (field: string, urls: string[]): EnrichmentResult => ({
+    field,
+    value: `${field} value`,
+    confidence: 0.8,
+    source: urls[0],
+    sourceContext: urls.map((url) => ({ url, snippet: `quote from ${url}` })),
+    sourceCount: urls.length,
+  });
+
+  const groupOf = (groupId: string, strategy: 'search' | 'agent' | 'browser', fieldNames: string[]) => ({
+    groupId,
+    strategy,
+    fieldNames,
+    found: fieldNames.length,
+    structuredOutputFailed: false,
+    notes: '',
+  });
+
+  /** A workflow whose stream shows only READ being read, then resolves to `result`. */
+  function stubWorkflow(result: unknown) {
+    const run = {
+      cancel: vi.fn(async () => undefined),
+      stream: () => ({
+        fullStream: (async function* () {
+          yield { type: 'workflow-step-output', payload: { output: { type: 'page-read', groupId: 'g', url: READ } } };
+        })(),
+        result: Promise.resolve(result),
+      }),
+    };
+    vi.spyOn(mastra, 'getWorkflow').mockReturnValue({ createRun: async () => run } as never);
+  }
+
+  function enrich(recordRow: ReturnType<typeof vi.fn>) {
+    return enrichRowWithMastra({
+      sessionId: 's',
+      rowIndex: 2,
+      row: { email: 'a@acme.example' },
+      email: 'a@acme.example',
+      plan: {} as never,
+      fields: [],
+      onProgress: () => {},
+      recording: { recordRow } as unknown as RunRecording,
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('records the citation-filtered enrichments, with each field\'s first group strategy', async () => {
+    stubWorkflow({
+      status: 'success',
+      result: {
+        enrichments: { price: cited('price', [UNREAD, READ]), rumour: cited('rumour', [UNREAD]) },
+        groups: [groupOf('pricing', 'browser', ['price']), groupOf('news', 'search', ['price', 'rumour'])],
+      },
+    });
+    const recordRow = vi.fn(async () => undefined);
+
+    const result = await enrich(recordRow);
+
+    expect(recordRow).toHaveBeenCalledOnce();
+    const [rowIndex, email, enrichments, strategies] = recordRow.mock.calls[0] as unknown as [
+      number,
+      string,
+      Record<string, EnrichmentResult>,
+      Record<string, string>,
+    ];
+    expect([rowIndex, email]).toEqual([2, 'a@acme.example']);
+    // The unread citation is gone, and a field left with none is not recorded.
+    expect(Object.keys(enrichments)).toEqual(['price']);
+    expect(enrichments.price.sourceContext?.map((context) => context.url)).toEqual([READ]);
+    expect(strategies).toEqual({ price: 'browser', rumour: 'search' });
+    // What is recorded is what the UI is sent.
+    expect(result?.enrichments).toEqual(enrichments);
+  });
+
+  it('records nothing for a row that failed', async () => {
+    stubWorkflow({ status: 'failed', error: new Error('model unavailable') });
+    const recordRow = vi.fn(async () => undefined);
+
+    const result = await enrich(recordRow);
+
+    expect(result).toMatchObject({ status: 'error', error: 'model unavailable' });
+    expect(recordRow).not.toHaveBeenCalled();
   });
 });

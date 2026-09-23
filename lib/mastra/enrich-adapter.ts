@@ -21,12 +21,18 @@
  * `failed` → `error`, `canceled` → nothing (the route reports the session as
  * cancelled; rows already sent keep their results).
  *
+ * Recording: with a {@link RunRecording} (one per session, see
+ * `startRunRecording`), each completed row's citation-filtered enrichments
+ * are written to the session's Dolt run as the row finishes (`lib/runs.ts`).
+ *
  * Citations: the workflow only keeps quotes from pages its tools read. The
  * adapter repeats the check against the run's visited set: the `page-read`
  * events, which follow only a successful tool result. Progress `sourceUrl`s
  * do not count (they are written before a fetch, so a failed scrape has one),
  * and neither do evidence urls, which would make the check circular.
  */
+import { doltConfigured } from '@/lib/dolt';
+import { abandonRun, finishRun, recordRow, startRun, type FieldStrategies, type FinishStatus } from '@/lib/runs';
 import type { CSVRow, EnrichmentResult, RowEnrichmentResult } from '@/lib/types';
 
 import { mastra } from './index';
@@ -201,10 +207,139 @@ export function filterCitations(
 export async function resolveSessionPlan(
   fields: readonly unknown[],
   abortSignal?: AbortSignal
-): Promise<{ plan: ResearchPlanType; fields: EnrichFieldDefinitionType[] }> {
+): Promise<{ plan: ResearchPlanType; fields: EnrichFieldDefinitionType[]; planId: string | null }> {
   const parsed = EnrichFieldDefinition.array().min(1).parse(fields);
-  const { plan } = await resolvePlan(parsed, { planner: mastra.getAgent('planner'), abortSignal });
-  return { plan, fields: parsed };
+  const resolved = await resolvePlan(parsed, { planner: mastra.getAgent('planner'), abortSignal });
+  // `planId`: the saved plan's id when the plan came from one; a plan the
+  // planner made on the fly has none.
+  return { plan: resolved.plan, fields: parsed, planId: resolved.planId ?? null };
+}
+
+/**
+ * The one line a session streams when its run is not recorded. Generic on
+ * purpose: the cause (a driver error naming the Dolt host, user or client
+ * address) goes to the server log only.
+ */
+const RUN_NOT_RECORDED = 'run not recorded: storage unavailable';
+
+/**
+ * A session's run in Dolt (`lib/runs.ts`), wrapped so that storage can never
+ * fail enrichment.
+ *
+ * Every Dolt call is caught. The first failure (Dolt not configured, the
+ * server down, a write rejected) is logged once with its cause, shown once as
+ * the `agent_progress` warning {@link RUN_NOT_RECORDED}, and the recording
+ * stops; rows keep streaming as if nothing happened. A failure at start is
+ * shown on the first row the run would have recorded, so a session whose rows
+ * are all skipped (nothing to record) stays quiet.
+ *
+ * @public The route creates one per session with {@link startRunRecording}.
+ */
+export class RunRecording {
+  private failed: boolean;
+  private warned = false;
+  private finished = false;
+
+  /** `startFailed`: the start already failed, and {@link startRunRecording} logged why. */
+  constructor(
+    private readonly runId: string | null,
+    startFailed: boolean,
+    private readonly warn: (rowIndex: number, line: ProgressLine) => void
+  ) {
+    this.failed = startFailed;
+  }
+
+  private fail(reason: unknown, rowIndex: number): void {
+    if (!this.failed) {
+      this.failed = true;
+      console.warn(`[RUNS] run not recorded: ${reason instanceof Error ? reason.message : String(reason)}`);
+    }
+    this.surface(rowIndex);
+  }
+
+  private surface(rowIndex: number): void {
+    if (this.warned || !this.failed) return;
+    this.warned = true;
+    this.warn(rowIndex, { message: RUN_NOT_RECORDED, messageType: 'warning' });
+  }
+
+  /** Record one row's result. Never throws. */
+  async recordRow(
+    rowIndex: number,
+    email: string,
+    enrichments: Record<string, EnrichmentResult>,
+    strategies: FieldStrategies
+  ): Promise<void> {
+    if (this.failed || !this.runId) return this.surface(rowIndex);
+    if (this.finished) {
+      console.warn(`[RUNS] row ${rowIndex} finished after run ${this.runId} was committed; not recorded`);
+      return;
+    }
+    try {
+      await recordRow(this.runId, email, enrichments, strategies);
+    } catch (error) {
+      this.fail(error, rowIndex);
+    }
+  }
+
+  /** Commit the run with its terminal status. Never throws; resolves to the run's commit hash. */
+  async finish(status: FinishStatus): Promise<string | null> {
+    if (this.finished || !this.runId) return null;
+    this.finished = true;
+    if (this.failed) {
+      // A run that stopped recording part-way is not committed as if whole.
+      await abandonRun(this.runId).catch(() => undefined);
+      return null;
+    }
+    try {
+      return await finishRun(this.runId, status);
+    } catch (error) {
+      this.fail(error, 0);
+      return null;
+    }
+  }
+}
+
+/**
+ * Start recording a session's run, once its plan is resolved. Never throws:
+ * with Dolt unconfigured or unreachable the recording is inert, logs why, and
+ * shows the generic warning on the first row.
+ *
+ * `planId` is the saved plan's id when the plan came from one; a plan from
+ * the planner fallback has none, and the run's `plan_id` is null.
+ */
+export async function startRunRecording({
+  planId,
+  listRef,
+  warn,
+}: {
+  planId?: string | null;
+  listRef: string;
+  warn: (rowIndex: number, line: ProgressLine) => void;
+}): Promise<RunRecording> {
+  if (!doltConfigured()) {
+    console.warn('[RUNS] run not recorded: Dolt is not configured (DOLT_HOST, DOLT_DATABASE)');
+    return new RunRecording(null, true, warn);
+  }
+  try {
+    const runId = await startRun({ planId: planId ?? null, listRef });
+    return new RunRecording(runId, false, warn);
+  } catch (error) {
+    console.warn(`[RUNS] run not recorded: ${error instanceof Error ? error.message : String(error)}`);
+    return new RunRecording(null, true, warn);
+  }
+}
+
+/**
+ * Field name → strategy of the group that researched it: the first group
+ * naming the field, the same group `toEnrichments` takes the finding from.
+ */
+function strategiesOf(groups: EnrichRowOutputType['groups']): FieldStrategies {
+  const strategies: Record<string, string> = {};
+  for (const group of groups) {
+    for (const name of group.fieldNames) strategies[name] ??= group.strategy;
+  }
+  return strategies;
 }
 
 export interface EnrichRowOptions {
@@ -221,6 +356,8 @@ export interface EnrichRowOptions {
    */
   runs?: Set<CancellableRun>;
   signal?: AbortSignal;
+  /** The session's run in Dolt; a completed row's enrichments are recorded to it. */
+  recording?: RunRecording;
 }
 
 /**
@@ -237,6 +374,7 @@ export async function enrichRowWithMastra({
   onProgress,
   runs,
   signal,
+  recording,
 }: EnrichRowOptions): Promise<RowEnrichmentResult | null> {
   if (signal?.aborted) return null;
 
@@ -265,12 +403,10 @@ export async function enrichRowWithMastra({
 
     if (result.status === 'success') {
       const output = result.result as EnrichRowOutputType;
-      return {
-        rowIndex,
-        originalData: row,
-        enrichments: filterCitations(output.enrichments as Record<string, EnrichmentResult>, visited),
-        status: 'completed',
-      };
+      // What the UI shows is what is recorded: the citation-filtered values.
+      const enrichments = filterCitations(output.enrichments as Record<string, EnrichmentResult>, visited);
+      await recording?.recordRow(rowIndex, email, enrichments, strategiesOf(output.groups));
+      return { rowIndex, originalData: row, enrichments, status: 'completed' };
     }
 
     // A cancelled run resolves with status `canceled`. `WorkflowStreamResult`
