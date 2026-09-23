@@ -1,0 +1,64 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Email to identify: eric@firecrawl.dev",
+        "systemMessage": "You identify the company",
+        "hasToolResult": false,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_e2e_identify_search",
+            "name": "search",
+            "arguments": {
+              "query": "firecrawl.dev company"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Email to identify: eric@firecrawl.dev",
+        "systemMessage": "You identify the company",
+        "hasToolResult": true,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.95}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Contact email: eric@firecrawl.dev\n\n## Research group: Who the company sells to",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_e2e_customers_search",
+            "name": "search",
+            "arguments": {
+              "query": "Firecrawl customers"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Contact email: eric@firecrawl.dev\n\n## Research group: Who the company sells to",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"sells_to_businesses\",\"value\":true,\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"Trusted by 150,000+\",\"confidence\":0.8}],\"sourcesAgree\":true},{\"field\":\"target_customer\",\"value\":\"Teams building AI agents\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"Power AI agents with   clean web data\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    }
+  ]
+}

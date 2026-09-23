@@ -83,6 +83,11 @@ export function isFirecrawlProgressEvent(value: unknown): value is FirecrawlProg
  * A client is an API key and an axios instance, so building one per call costs
  * nothing next to the request it is about to make, and it keeps the tools free
  * of module-level state that a test would have to reset between cases.
+ *
+ * `FIRECRAWL_API_URL`, when set, is the API origin the client calls instead of
+ * the SDK's default (`https://api.firecrawl.dev`): a self-hosted Firecrawl, or
+ * the recorded-response stub the browser tests run against
+ * (`tests/e2e/firecrawl-stub.mjs`). Unset or empty leaves the default.
  */
 export function firecrawlClient(): Firecrawl {
   const apiKey = process.env.FIRECRAWL_API_KEY;
@@ -91,7 +96,9 @@ export function firecrawlClient(): Firecrawl {
     throw new Error('FIRECRAWL_API_KEY is not set, so the Firecrawl tools cannot run.');
   }
 
-  return new Firecrawl({ apiKey });
+  const apiUrl = process.env.FIRECRAWL_API_URL?.trim();
+
+  return new Firecrawl(apiUrl ? { apiKey, apiUrl } : { apiKey });
 }
 
 /** The reason an aborted signal carries, or a standard `AbortError` if it has none. */
