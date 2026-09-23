@@ -210,7 +210,7 @@ export function readCommitHash(result: unknown): string | null {
 }
 
 /** Dolt reports an empty commit as an error; recognise it by message. */
-function isNothingToCommit(error: unknown): boolean {
+export function isNothingToCommit(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /nothing to commit|no changes added to commit/i.test(message);
 }

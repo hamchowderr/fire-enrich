@@ -344,13 +344,89 @@ describe('finishRun', () => {
     let merges = 0;
     fake.respond(/DOLT_MERGE/, () => {
       merges += 1;
-      if (merges === 1) throw new Error('this transaction conflicts with a committed transaction from another client, try restarting transaction');
+      // Dolt 2.1.8's wording, as a real two-client race produces it.
+      if (merges === 1) {
+        throw new Error(
+          'serialization failure: this transaction conflicts with a committed transaction from another client, try restarting transaction.'
+        );
+      }
       return [[{ hash: '', fast_forward: 0, conflicts: 0 }]];
     });
 
     await expect(finishRun(runId, 'completed')).resolves.toBeTruthy();
     expect(merges).toBe(2);
     expect(fake.find(/^ROLLBACK$/, 'fire_enrich')).toHaveLength(1);
+  });
+
+  it('does not retry an error that is not a lost race', async () => {
+    const { finishRun, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    fake.respond(/DOLT_MERGE/, () => {
+      throw new Error('working set changed');
+    });
+
+    await expect(finishRun(runId, 'completed')).rejects.toThrow('working set changed');
+    expect(fake.find(/DOLT_MERGE/)).toHaveLength(1);
+  });
+
+  it('confirms a merge whose acknowledgement was lost, from commit_hash on main', async () => {
+    const { finishRun, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    // The first attempt's merge commit lands, but its COMMIT reports a lost
+    // race; the retry then finds the branch already merged, as real Dolt
+    // answers it.
+    let commits = 0;
+    fake.respond(/^COMMIT$/, () => {
+      commits += 1;
+      if (commits === 1) throw new Error('serialization failure: ... try restarting transaction.');
+      return [];
+    });
+    let merges = 0;
+    fake.respond(/DOLT_MERGE/, () => {
+      merges += 1;
+      return merges === 1
+        ? [[{ hash: '', fast_forward: 0, conflicts: 0, message: 'merge successful' }]]
+        : [[{ hash: '', fast_forward: 0, conflicts: 0, message: 'cannot fast forward from a to b. a is ahead of b already' }]];
+    });
+    fake.respond(/SELECT commit_hash/, () => [{ commit_hash: fake.hashes[0] }]);
+
+    const hash = await finishRun(runId, 'completed');
+
+    expect(hash).toBe(fake.hashes[0]);
+    const retry = fake.log.filter((statement) => statement.on === 'fire_enrich').slice(6);
+    expect(retry.map(({ sql, params }) => [sql, params])).toEqual([
+      ['START TRANSACTION', []],
+      ["CALL DOLT_MERGE('--no-ff', '--no-commit', ?)", [`run/${runId}`]],
+      ['ROLLBACK', []],
+      ['SELECT commit_hash FROM enrichment_runs WHERE id = ?', [runId]],
+    ]);
+    // Recorded, so the branch is dropped as after any merge.
+    expect(fake.log.at(-1)).toEqual({ on: 'pool', sql: "CALL DOLT_BRANCH('-d', ?)", params: [`run/${runId}`] });
+  });
+
+  it('confirms from main when a no-op merge ends in "nothing to commit"', async () => {
+    const { finishRun, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    fake.respond(/DOLT_COMMIT/, ({ on }) => {
+      if (on === 'fire_enrich') throw new Error('nothing to commit');
+      return [[{ hash: 'runcommit01' }]];
+    });
+    fake.respond(/SELECT commit_hash/, () => [{ commit_hash: 'runcommit01' }]);
+
+    await expect(finishRun(runId, 'completed')).resolves.toBe('runcommit01');
+    expect(fake.find(/^COMMIT$/, 'fire_enrich')).toEqual([]);
+    expect(fake.find(/DOLT_BRANCH\('-d'/)).toHaveLength(1);
+  });
+
+  it('throws, keeping the branch, when main is already merged but carries another commit', async () => {
+    const { finishRun, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    fake.respond(/DOLT_MERGE/, () => [[{ hash: '', fast_forward: 0, conflicts: 0, message: 'cannot fast forward from a to b. a is ahead of b already' }]]);
+    fake.respond(/SELECT commit_hash/, () => [{ commit_hash: null }]);
+
+    await expect(finishRun(runId, 'completed')).rejects.toThrow('does not carry its commit');
+    expect(fake.find(/SET commit_hash/)).toEqual([]);
+    expect(fake.find(/DOLT_BRANCH\('-d'/)).toEqual([]);
   });
 
   it('rolls the merge back and throws when it conflicts, keeping the branch', async () => {

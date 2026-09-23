@@ -11,7 +11,8 @@ import { configureDolt, installFakeDolt, isolateDoltEnv } from './fake-dolt';
 /**
  * The adapter's run recording (`RunRecording` in `lib/mastra/enrich-adapter.ts`)
  * over a fake Dolt: storage failures never throw into enrichment, and are
- * reported once, as one `agent_progress` warning.
+ * reported once, as one generic `agent_progress` warning. The cause goes to
+ * the server log, never to the browser.
  */
 const { createPool, createConnection } = vi.hoisted(() => ({ createPool: vi.fn(), createConnection: vi.fn() }));
 
@@ -60,8 +61,9 @@ describe('RunRecording without Dolt', () => {
     await recording.recordRow(1, 'b@b.example', { headline: ENRICHMENT }, {});
     await expect(recording.finish('completed')).resolves.toBeNull();
 
-    expect(warnings).toEqual([{ rowIndex: 0, message: 'run not recorded: Dolt is not configured', messageType: 'warning' }]);
+    expect(warnings).toEqual([{ rowIndex: 0, message: 'run not recorded: storage unavailable', messageType: 'warning' }]);
     expect(warnLog).toHaveBeenCalledTimes(1);
+    expect(warnLog).toHaveBeenCalledWith(expect.stringContaining('Dolt is not configured'));
     expect(createPool).not.toHaveBeenCalled();
     expect(createConnection).not.toHaveBeenCalled();
   });
@@ -76,7 +78,7 @@ describe('RunRecording without Dolt', () => {
 });
 
 describe('RunRecording with Dolt down', () => {
-  it('reports the connection error once and keeps going', async () => {
+  it('reports the connection failure once, without its detail, and keeps going', async () => {
     configureDolt();
     fake.respond(/DOLT_BRANCH/, () => {
       throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:3316'), { code: 'ECONNREFUSED' });
@@ -87,10 +89,10 @@ describe('RunRecording with Dolt down', () => {
     await recording.recordRow(4, 'b@b.example', { headline: ENRICHMENT }, {});
     await recording.finish('completed');
 
-    expect(warnings).toEqual([
-      { rowIndex: 3, message: 'run not recorded: connect ECONNREFUSED 127.0.0.1:3316', messageType: 'warning' },
-    ]);
+    expect(warnings).toEqual([{ rowIndex: 3, message: 'run not recorded: storage unavailable', messageType: 'warning' }]);
+    // The driver error names the host; it is logged, not streamed.
     expect(warnLog).toHaveBeenCalledTimes(1);
+    expect(warnLog).toHaveBeenCalledWith('[RUNS] run not recorded: connect ECONNREFUSED 127.0.0.1:3316');
     expect(fake.find(/INSERT|DOLT_COMMIT|DOLT_MERGE/)).toEqual([]);
   });
 
@@ -105,7 +107,8 @@ describe('RunRecording with Dolt down', () => {
     await recording.recordRow(1, 'b@b.example', { headline: ENRICHMENT }, {});
     await expect(recording.finish('completed')).resolves.toBeNull();
 
-    expect(warnings).toEqual([{ rowIndex: 0, message: 'run not recorded: lost connection to server', messageType: 'warning' }]);
+    expect(warnings).toEqual([{ rowIndex: 0, message: 'run not recorded: storage unavailable', messageType: 'warning' }]);
+    expect(warnLog).toHaveBeenCalledWith('[RUNS] run not recorded: lost connection to server');
     expect(fake.find(/INSERT INTO enrichments/)).toHaveLength(1);
     expect(fake.find(/DOLT_COMMIT|DOLT_MERGE/)).toEqual([]);
     // The run's branch connection is closed, not leaked.
@@ -122,7 +125,8 @@ describe('RunRecording with Dolt down', () => {
     await recording.recordRow(0, 'a@a.example', { headline: ENRICHMENT }, {});
     await expect(recording.finish('completed')).resolves.toBeNull();
 
-    expect(warnings).toEqual([{ rowIndex: 0, message: 'run not recorded: database is read only', messageType: 'warning' }]);
+    expect(warnings).toEqual([{ rowIndex: 0, message: 'run not recorded: storage unavailable', messageType: 'warning' }]);
+    expect(warnLog).toHaveBeenCalledWith('[RUNS] run not recorded: database is read only');
   });
 });
 

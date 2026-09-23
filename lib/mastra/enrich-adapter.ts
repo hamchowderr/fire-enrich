@@ -211,50 +211,56 @@ export async function resolveSessionPlan(
   const parsed = EnrichFieldDefinition.array().min(1).parse(fields);
   const resolved = await resolvePlan(parsed, { planner: mastra.getAgent('planner'), abortSignal });
   // `planId`: the saved plan's id when the plan came from one; a plan the
-  // planner made on the fly has none. Read structurally, as not every
-  // resolution carries it.
-  const planId = (resolved as { planId?: unknown }).planId;
-  return { plan: resolved.plan, fields: parsed, planId: typeof planId === 'string' && planId ? planId : null };
+  // planner made on the fly has none.
+  return { plan: resolved.plan, fields: parsed, planId: resolved.planId ?? null };
 }
+
+/**
+ * The one line a session streams when its run is not recorded. Generic on
+ * purpose: the cause (a driver error naming the Dolt host, user or client
+ * address) goes to the server log only.
+ */
+const RUN_NOT_RECORDED = 'run not recorded: storage unavailable';
 
 /**
  * A session's run in Dolt (`lib/runs.ts`), wrapped so that storage can never
  * fail enrichment.
  *
  * Every Dolt call is caught. The first failure (Dolt not configured, the
- * server down, a write rejected) is logged once and shown once as an
- * `agent_progress` warning, "run not recorded: …", and the recording stops;
- * rows keep streaming as if nothing happened. A failure at start is shown on
- * the first row the run would have recorded, so a session whose rows are all
- * skipped (nothing to record) stays quiet.
+ * server down, a write rejected) is logged once with its cause, shown once as
+ * the `agent_progress` warning {@link RUN_NOT_RECORDED}, and the recording
+ * stops; rows keep streaming as if nothing happened. A failure at start is
+ * shown on the first row the run would have recorded, so a session whose rows
+ * are all skipped (nothing to record) stays quiet.
  *
  * @public The route creates one per session with {@link startRunRecording}.
  */
 export class RunRecording {
-  private failure: string | null = null;
+  private failed: boolean;
   private warned = false;
   private finished = false;
 
+  /** `startFailed`: the start already failed, and {@link startRunRecording} logged why. */
   constructor(
     private readonly runId: string | null,
-    startFailure: string | null,
+    startFailed: boolean,
     private readonly warn: (rowIndex: number, line: ProgressLine) => void
   ) {
-    this.failure = startFailure;
+    this.failed = startFailed;
   }
 
   private fail(reason: unknown, rowIndex: number): void {
-    if (!this.failure) {
-      this.failure = reason instanceof Error ? reason.message : String(reason);
-      console.warn(`[RUNS] run not recorded: ${this.failure}`);
+    if (!this.failed) {
+      this.failed = true;
+      console.warn(`[RUNS] run not recorded: ${reason instanceof Error ? reason.message : String(reason)}`);
     }
     this.surface(rowIndex);
   }
 
   private surface(rowIndex: number): void {
-    if (this.warned || !this.failure) return;
+    if (this.warned || !this.failed) return;
     this.warned = true;
-    this.warn(rowIndex, { message: `run not recorded: ${this.failure}`, messageType: 'warning' });
+    this.warn(rowIndex, { message: RUN_NOT_RECORDED, messageType: 'warning' });
   }
 
   /** Record one row's result. Never throws. */
@@ -264,7 +270,7 @@ export class RunRecording {
     enrichments: Record<string, EnrichmentResult>,
     strategies: FieldStrategies
   ): Promise<void> {
-    if (this.failure || !this.runId) return this.surface(rowIndex);
+    if (this.failed || !this.runId) return this.surface(rowIndex);
     if (this.finished) {
       console.warn(`[RUNS] row ${rowIndex} finished after run ${this.runId} was committed; not recorded`);
       return;
@@ -280,7 +286,7 @@ export class RunRecording {
   async finish(status: FinishStatus): Promise<string | null> {
     if (this.finished || !this.runId) return null;
     this.finished = true;
-    if (this.failure) {
+    if (this.failed) {
       // A run that stopped recording part-way is not committed as if whole.
       await abandonRun(this.runId).catch(() => undefined);
       return null;
@@ -296,8 +302,8 @@ export class RunRecording {
 
 /**
  * Start recording a session's run, once its plan is resolved. Never throws:
- * with Dolt unconfigured or unreachable the recording is inert and reports
- * why on the first row.
+ * with Dolt unconfigured or unreachable the recording is inert, logs why, and
+ * shows the generic warning on the first row.
  *
  * `planId` is the saved plan's id when the plan came from one; a plan from
  * the planner fallback has none, and the run's `plan_id` is null.
@@ -313,15 +319,14 @@ export async function startRunRecording({
 }): Promise<RunRecording> {
   if (!doltConfigured()) {
     console.warn('[RUNS] run not recorded: Dolt is not configured (DOLT_HOST, DOLT_DATABASE)');
-    return new RunRecording(null, 'Dolt is not configured', warn);
+    return new RunRecording(null, true, warn);
   }
   try {
     const runId = await startRun({ planId: planId ?? null, listRef });
-    return new RunRecording(runId, null, warn);
+    return new RunRecording(runId, false, warn);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    console.warn(`[RUNS] run not recorded: ${reason}`);
-    return new RunRecording(null, reason, warn);
+    console.warn(`[RUNS] run not recorded: ${error instanceof Error ? error.message : String(error)}`);
+    return new RunRecording(null, true, warn);
   }
 }
 

@@ -32,17 +32,30 @@
  * parent history: one commit per run, whose diff is that run plus its
  * `commit_hash`), with the run's own commit as its second parent.
  *
- * Merges into `main` run one at a time in this process ({@link withMainLock})
- * and inside a SQL transaction, so a profile write on `main` in between cannot
- * be swept into a run's merge, nor the merge into a profile commit.
+ * Merges into `main` run one at a time in this process ({@link withMainLock}),
+ * each inside a SQL transaction. That keeps this process's merges from
+ * interleaving with each other. It does not isolate a merge from other
+ * writes to `main` (see Limits).
  *
  * ## Limits
  *
- * - The merge lock is per process. Several app instances against one Dolt
- *   server can still merge at the same moment; Dolt then rejects the later
- *   transaction commit, and the merge is retried ({@link MERGE_ATTEMPTS})
- *   rather than lost. Runs never conflict at the row level (every row they
- *   write has a fresh nanoid key), so a retry always applies cleanly.
+ * - A run's merge commit can carry someone else's uncommitted change.
+ *   `DOLT_MERGE('--no-commit')` stages the merge on top of `main`'s working
+ *   set, and `DOLT_COMMIT('-Am')` commits that whole working set. A write on
+ *   `main` that is committed as SQL but not yet as a Dolt commit (a profile
+ *   write between its INSERT and its `DOLT_COMMIT`, from this process or
+ *   another) is swept into the run's merge commit. Nothing is lost, but that
+ *   commit's diff is then more than the run.
+ * - The merge lock is per process. Merges from several app instances can
+ *   overlap. Dolt merges concurrent transactions cell by cell, and runs
+ *   write disjoint rows (fresh nanoid keys), so overlapping merges normally
+ *   both commit. A transaction that does collide fails with Dolt's
+ *   "serialization failure: this transaction conflicts with a committed
+ *   transaction from another client, try restarting transaction", and the
+ *   merge is retried ({@link MERGE_ATTEMPTS}).
+ * - A merge whose commit landed but whose acknowledgement was lost is
+ *   retried like any other. The retry finds the branch already merged and
+ *   confirms it from `commit_hash` on `main` ({@link confirmMerged}).
  * - A run in flight is only visible on its branch
  *   (`SELECT * FROM enrichment_runs AS OF 'run/<id>'`, or `dolt_branches`),
  *   not on `main`, until it finishes.
@@ -61,7 +74,7 @@ import { createHash } from 'node:crypto';
 import type mysql from 'mysql2/promise';
 import { nanoid } from 'nanoid';
 
-import { connect, query, readCommitHash } from '@/lib/dolt';
+import { connect, isNothingToCommit, query, readCommitHash } from '@/lib/dolt';
 import type { CSVRow, EnrichmentResult } from '@/lib/types';
 
 /** Identity on run commits when `DOLT_COMMIT_AUTHOR` is unset or malformed. */
@@ -332,22 +345,50 @@ function commitMessage(run: ActiveRun, status: FinishStatus): string {
   ].join('\n');
 }
 
-/** A transient failure of a concurrent write to `main`, worth retrying. */
+/**
+ * A transaction that lost a race with another client's write to `main`,
+ * worth retrying. Dolt 2.1 words it "serialization failure: this transaction
+ * conflicts with a committed transaction from another client, try restarting
+ * transaction."; MySQL's deadlock error also ends in "try restarting
+ * transaction".
+ */
 function isRetryableMergeError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /concurrent|serialization|deadlock|try restarting transaction|working set/i.test(message);
+  return /serialization failure|try restarting transaction/i.test(message);
 }
 
-/** The `conflicts` count of a `DOLT_MERGE` result, whichever shape the driver returns. */
-function mergeConflicts(result: unknown): number {
+/** The first row of a `DOLT_MERGE` result, whichever shape the driver returns. */
+function mergeRow(result: unknown): { conflicts?: unknown; message?: unknown } | undefined {
   const first = Array.isArray(result) ? result[0] : result;
-  const row = Array.isArray(first) ? first[0] : first;
-  return Number((row as { conflicts?: unknown } | undefined)?.conflicts ?? 0);
+  return (Array.isArray(first) ? first[0] : first) as { conflicts?: unknown; message?: unknown } | undefined;
+}
+
+/**
+ * Whether `DOLT_MERGE` found the branch already in `main`. Dolt 2.1.8
+ * answers a clean, empty merge: "cannot fast forward from a to b. a is ahead
+ * of b already". Any other wording still ends in "nothing to commit" at
+ * `DOLT_COMMIT`, which is handled the same way.
+ */
+function isAlreadyMerged(result: unknown): boolean {
+  return /is ahead of/i.test(String(mergeRow(result)?.message ?? ''));
+}
+
+/**
+ * A merge that found nothing to merge: an earlier attempt committed, and only
+ * its acknowledgement was lost. The run is recorded if `main`'s run row
+ * carries this run's commit; anything else is an error, not a success.
+ */
+async function confirmMerged(connection: mysql.Connection, run: ActiveRun, runCommit: string): Promise<null> {
+  const [rows] = await connection.query('SELECT commit_hash FROM enrichment_runs WHERE id = ?', [run.id]);
+  const onMain = (rows as Array<{ commit_hash?: unknown }>)[0]?.commit_hash;
+  if (onMain === runCommit) return null;
+  throw new Error(`${run.branch} is already in main, but main's run row does not carry its commit ${runCommit}`);
 }
 
 /**
  * Merge the run's branch into `main` and record its commit hash there, as one
- * merge commit. Returns the merge commit's hash.
+ * merge commit. Returns the merge commit's hash, or null when the branch was
+ * already merged by an earlier attempt.
  */
 async function mergeIntoMain(run: ActiveRun, runCommit: string, message: string, author: string): Promise<string | null> {
   const connection = await connect();
@@ -355,19 +396,31 @@ async function mergeIntoMain(run: ActiveRun, runCommit: string, message: string,
     await connection.query('START TRANSACTION');
     try {
       const [merge] = await connection.query("CALL DOLT_MERGE('--no-ff', '--no-commit', ?)", [run.branch]);
-      if (mergeConflicts(merge) > 0) throw new Error(`Merging ${run.branch} into main conflicted`);
+      if (Number(mergeRow(merge)?.conflicts ?? 0) > 0) throw new Error(`Merging ${run.branch} into main conflicted`);
 
-      await connection.query('UPDATE enrichment_runs SET commit_hash = ? WHERE id = ?', [runCommit, run.id]);
-      const [committed] = await connection.query("CALL DOLT_COMMIT('-Am', ?, '--author', ?)", [
-        `Merge ${message}`,
-        author,
-      ]);
-      await connection.query('COMMIT');
-      return readCommitHash(committed);
+      if (!isAlreadyMerged(merge)) {
+        await connection.query('UPDATE enrichment_runs SET commit_hash = ? WHERE id = ?', [runCommit, run.id]);
+        const committed = await connection
+          .query("CALL DOLT_COMMIT('-Am', ?, '--author', ?)", [`Merge ${message}`, author])
+          .then(([result]) => result, (error: unknown) => {
+            // A no-op merge that Dolt did not word as one.
+            if (isNothingToCommit(error)) return null;
+            throw error;
+          });
+        if (committed !== null) {
+          await connection.query('COMMIT');
+          return readCommitHash(committed);
+        }
+      }
     } catch (error) {
       await connection.query('ROLLBACK').catch(() => undefined);
       throw error;
     }
+
+    // Already merged. Read outside the transaction, so the row is `main`'s
+    // committed state.
+    await connection.query('ROLLBACK');
+    return confirmMerged(connection, run, runCommit);
   } finally {
     await connection.end().catch(() => undefined);
   }

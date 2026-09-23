@@ -9,6 +9,10 @@
  * With the flag unset the legacy strategy is used; it is mocked here, because
  * what is under test is the dispatch, not the legacy engine.
  *
+ * The Dolt run store (`lib/runs.ts`) is mocked too: its SQL is covered by
+ * `tests/runs/`, and what is under test here is when the route calls it.
+ * Recording is off (`doltConfigured()` false) unless a test turns it on.
+ *
  * Requires AIMock on `AIMOCK_URL` (`npm run test:ai` starts it).
  */
 import { NextRequest } from 'next/server';
@@ -26,6 +30,27 @@ const { searchMock, scrapeMock, mapMock, startAgentMock, getAgentStatusMock, leg
   startAgentMock: vi.fn(),
   getAgentStatusMock: vi.fn(),
   legacyEnrichRow: vi.fn(),
+}));
+
+const runs = vi.hoisted(() => ({
+  doltConfigured: vi.fn(),
+  startRun: vi.fn(),
+  recordRow: vi.fn(),
+  finishRun: vi.fn(),
+  abandonRun: vi.fn(),
+}));
+
+vi.mock('@/lib/dolt', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/dolt')>()),
+  doltConfigured: runs.doltConfigured,
+}));
+
+vi.mock('@/lib/runs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/runs')>()),
+  startRun: runs.startRun,
+  recordRow: runs.recordRow,
+  finishRun: runs.finishRun,
+  abandonRun: runs.abandonRun,
 }));
 
 vi.mock('firecrawl', () => ({
@@ -150,12 +175,17 @@ beforeEach(() => {
   startAgentMock.mockResolvedValue({ success: true, id: 'agent_fixture_job' });
   getAgentStatusMock.mockResolvedValue(agentFixture);
   putPlan(PLAN);
+  runs.doltConfigured.mockReturnValue(false);
+  runs.startRun.mockResolvedValue('run_1');
+  runs.recordRow.mockResolvedValue(1);
+  runs.finishRun.mockResolvedValue('hash_1');
+  runs.abandonRun.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   delete process.env.ENRICH_ENGINE;
   vi.restoreAllMocks();
-  for (const mock of [searchMock, scrapeMock, mapMock, startAgentMock, getAgentStatusMock, legacyEnrichRow]) {
+  for (const mock of [searchMock, scrapeMock, mapMock, startAgentMock, getAgentStatusMock, legacyEnrichRow, ...Object.values(runs)]) {
     mock.mockReset();
   }
 });
@@ -305,6 +335,151 @@ describe('POST /api/enrich with ENRICH_ENGINE=mastra', () => {
     const response = await DELETE(new NextRequest('http://localhost/api/enrich?sessionId=missing', { method: 'DELETE' }));
 
     expect(response.status).toBe(404);
+  });
+});
+
+/** DELETE the session as soon as the identify step's first (held) search starts. */
+function cancelOnFirstSearch() {
+  let sessionId = '';
+  let cancelled = false;
+  return (event: Event) => {
+    if (event.type === 'session') sessionId = event.sessionId as string;
+    if (event.type === 'agent_progress' && String(event.message).startsWith('Searching the web') && !cancelled) {
+      cancelled = true;
+      void DELETE(new NextRequest(`http://localhost/api/enrich?sessionId=${sessionId}`, { method: 'DELETE' }));
+    }
+  };
+}
+
+describe('POST /api/enrich run recording (lib/runs mocked)', () => {
+  const warnings = (events: Event[]) =>
+    events.filter((event) => event.type === 'agent_progress' && String(event.message).startsWith('run not recorded'));
+
+  it(
+    'starts the run with the resolved planId, records each row as shown, and commits before `complete`',
+    { timeout: 120_000 },
+    async () => {
+      process.env.ENRICH_ENGINE = 'mastra';
+      runs.doltConfigured.mockReturnValue(true);
+      // The plan resolves from a saved row, so it carries that row's id.
+      putPlan(PLAN, { planId: 'plan_saved' });
+
+      const timeline: string[] = [];
+      runs.finishRun.mockImplementation(async () => {
+        timeline.push('finish:start');
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        timeline.push('finish:end');
+        return 'hash_1';
+      });
+
+      const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]), (event) => timeline.push(event.type));
+
+      expect(runs.startRun).toHaveBeenCalledOnce();
+      expect(runs.startRun).toHaveBeenCalledWith({ planId: 'plan_saved', listRef: expect.stringMatching(/^emails:sha256:/) });
+
+      // What is recorded is what the UI got: the citation-filtered values,
+      // each with the strategy of the plan group that researched it.
+      const { result } = events.find((event) => event.type === 'result') as unknown as {
+        result: { enrichments: Record<string, unknown> };
+      };
+      expect(runs.recordRow).toHaveBeenCalledOnce();
+      expect(runs.recordRow).toHaveBeenCalledWith('run_1', 'hello@firecrawl.dev', result.enrichments, {
+        product_summary: 'search',
+        homepage_headline: 'browser',
+      });
+      const recorded = runs.recordRow.mock.calls[0][2] as Record<string, { sourceContext?: Array<{ url: string }> }>;
+      expect(recorded.product_summary.sourceContext?.map((context) => context.url)).toEqual(['https://www.firecrawl.dev/']);
+
+      // Committed as completed, and only then is `complete` sent.
+      expect(runs.finishRun).toHaveBeenCalledOnce();
+      expect(runs.finishRun).toHaveBeenCalledWith('run_1', 'completed');
+      expect(timeline.indexOf('complete')).toBeGreaterThan(timeline.indexOf('finish:end'));
+      expect(warnings(events)).toEqual([]);
+    }
+  );
+
+  it('does not start a run before the plan resolves: a cancel during planning records nothing', { timeout: 30_000 }, async () => {
+    process.env.ENRICH_ENGINE = 'mastra';
+    runs.doltConfigured.mockReturnValue(true);
+    const planner = mastra.getAgent('planner');
+    vi.spyOn(planner, 'generate').mockImplementation(((_message: unknown, options?: { abortSignal?: AbortSignal }) =>
+      new Promise<never>((_resolve, reject) => {
+        options?.abortSignal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      })) as unknown as typeof planner.generate);
+
+    const uncached = [{ name: 'uncached_field', displayName: 'Uncached Field', description: 'x', type: 'string', required: false }];
+    const response = await POST(
+      new NextRequest('http://localhost/api/enrich', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rows: [{ email: 'hello@firecrawl.dev' }], fields: uncached, emailColumn: 'email' }),
+      })
+    );
+    let sessionId = '';
+    const events = await readEvents(response, (event) => {
+      if (event.type === 'session') sessionId = event.sessionId as string;
+      if (event.type === 'pending') {
+        setTimeout(() => void DELETE(new NextRequest(`http://localhost/api/enrich?sessionId=${sessionId}`, { method: 'DELETE' })), 50);
+      }
+    });
+
+    expect(events.map((event) => event.type)).toEqual(['session', 'pending', 'cancelled']);
+    expect(runs.startRun).not.toHaveBeenCalled();
+    expect(runs.finishRun).not.toHaveBeenCalled();
+  });
+
+  it('commits a cancelled session as `partial`, with a null planId for an unsaved plan', { timeout: 60_000 }, async () => {
+    process.env.ENRICH_ENGINE = 'mastra';
+    runs.doltConfigured.mockReturnValue(true);
+    searchMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(searchFixture), 10_000)));
+
+    const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]), cancelOnFirstSearch());
+
+    expect(events.map((event) => event.type)).toContain('cancelled');
+    // The cached plan has no saved row behind it.
+    expect(runs.startRun).toHaveBeenCalledWith({ planId: null, listRef: expect.any(String) });
+    expect(runs.recordRow).not.toHaveBeenCalled();
+    expect(runs.finishRun).toHaveBeenCalledOnce();
+    expect(runs.finishRun).toHaveBeenCalledWith('run_1', 'partial');
+  });
+
+  it('commits a session that fails part-way as `failed`', { timeout: 30_000 }, async () => {
+    process.env.ENRICH_ENGINE = 'mastra';
+    runs.doltConfigured.mockReturnValue(true);
+
+    // A null row throws in the row loop, outside the per-row error handling,
+    // which fails the session after its run has started.
+    const response = await POST(
+      new NextRequest('http://localhost/api/enrich', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rows: [null], fields: FIELDS, emailColumn: 'email', listRef: 'contacts.csv' }),
+      })
+    );
+    const events = await readEvents(response);
+
+    expect(events.map((event) => event.type)).toContain('error');
+    expect(runs.startRun).toHaveBeenCalledWith({ planId: null, listRef: 'contacts.csv' });
+    expect(runs.finishRun).toHaveBeenCalledOnce();
+    expect(runs.finishRun).toHaveBeenCalledWith('run_1', 'failed');
+  });
+
+  it('streams one generic warning when the run cannot be recorded, and enriches every row', { timeout: 120_000 }, async () => {
+    process.env.ENRICH_ENGINE = 'mastra';
+    runs.doltConfigured.mockReturnValue(true);
+    runs.startRun.mockRejectedValue(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:3316'), { code: 'ECONNREFUSED' }));
+
+    const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }, { email: 'hello@firecrawl.dev' }]));
+
+    expect(warnings(events)).toHaveLength(1);
+    expect(warnings(events)[0]).toMatchObject({ message: 'run not recorded: storage unavailable', messageType: 'warning' });
+    // The driver error never reaches the browser.
+    expect(JSON.stringify(events)).not.toMatch(/ECONNREFUSED|3316/);
+    const results = events.filter((event) => event.type === 'result') as unknown as Array<{ result: { status: string } }>;
+    expect(results.map(({ result }) => result.status)).toEqual(['completed', 'completed']);
+    expect(events.at(-1)?.type).toBe('complete');
+    expect(runs.recordRow).not.toHaveBeenCalled();
+    expect(runs.finishRun).not.toHaveBeenCalled();
   });
 });
 
