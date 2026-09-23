@@ -81,7 +81,7 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 ## Architecture Overview
 
-`POST /api/enrich` dispatches on `ENRICH_ENGINE`: `mastra` runs the `enrichRow` workflow (`lib/mastra/workflows/enrich-row.ts`) per row through `lib/mastra/enrich-adapter.ts`; anything else (default `legacy`) uses `lib/strategies/agent-enrichment-strategy.ts`.
+`POST /api/enrich` runs the `enrichRow` workflow (`lib/mastra/workflows/enrich-row.ts`) per row through `lib/mastra/enrich-adapter.ts`. `POST /api/chat` streams the `chat` agent (`lib/mastra/agents/chat.ts`), which answers from the enriched table or searches the web with the Firecrawl tools.
 
 ## Conventions & Patterns
 

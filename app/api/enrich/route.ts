@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AgentEnrichmentStrategy } from '@/lib/strategies/agent-enrichment-strategy';
 import type { EnrichmentRequest, RowEnrichmentResult } from '@/lib/types';
 import { loadSkipList, shouldSkipEmail, getSkipReason } from '@/lib/utils/skip-list';
 import { ENRICHMENT_CONFIG } from '@/lib/config/enrichment';
@@ -29,15 +28,6 @@ const CANCEL_SETTLE_MS = 15_000;
 
 // Store active sessions in memory (in production, use Redis or similar)
 const activeSessions = new Map<string, ActiveSession>();
-
-/**
- * Which pipeline enriches rows. `mastra` runs the enrichRow workflow through
- * `lib/mastra/enrich-adapter.ts`; anything else keeps the legacy strategy.
- * Read per request so a restart is not needed to switch.
- */
-function mastraEngineSelected(): boolean {
-  return process.env.ENRICH_ENGINE === 'mastra';
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -98,14 +88,6 @@ export async function POST(request: NextRequest) {
     const session: ActiveSession = { controller: abortController, runs: new Set() };
     activeSessions.set(sessionId, session);
 
-    const mastraEngine = mastraEngineSelected();
-    const strategyName = mastraEngine ? 'MastraEnrichRowWorkflow' : 'AgentEnrichmentStrategy';
-
-    console.log(`[STRATEGY] Using ${strategyName}`);
-    // Built for both engines (construction makes no calls); only the legacy
-    // path uses it.
-    const enrichmentStrategy = new AgentEnrichmentStrategy(gatewayApiKey, firecrawlApiKey);
-
     // Load skip list
     const skipList = await loadSkipList();
 
@@ -125,7 +107,7 @@ export async function POST(request: NextRequest) {
           }
         };
 
-        // The session's run in Dolt (Mastra engine only). Never throws: with
+        // The session's run in Dolt. Never throws: with
         // storage unavailable it says so once in the stream and rows go on.
         let recording: RunRecording | null = null;
 
@@ -134,9 +116,7 @@ export async function POST(request: NextRequest) {
           send({ type: 'session', sessionId });
 
           // Process rows with rolling concurrency (as each finishes, start the next)
-          const concurrency = mastraEngine
-            ? ENRICHMENT_CONFIG.MASTRA_CONCURRENT_ROWS
-            : ENRICHMENT_CONFIG.CONCURRENT_ROWS;
+          const concurrency = ENRICHMENT_CONFIG.MASTRA_CONCURRENT_ROWS;
           console.log(`[ENRICHMENT] Processing ${rows.length} rows with rolling concurrency: ${concurrency}`);
 
           // Send pending status for all rows
@@ -144,23 +124,19 @@ export async function POST(request: NextRequest) {
             send({ type: 'pending', rowIndex: i, totalRows: rows.length });
           }
 
-          // The Mastra engine resolves the plan once for the whole session —
+          // The plan is resolved once for the whole session —
           // the cached plan behind these fields, or one from the planner — and
           // passes it to every row, so a cold cache costs one planner call, not
           // one per concurrent row. Resolved after `pending` so the table fills
           // while a miss is being planned.
-          const mastraPlan = mastraEngine
-            ? await resolveSessionPlan(fields, abortController.signal)
-            : null;
+          const mastraPlan = await resolveSessionPlan(fields, abortController.signal);
 
-          if (mastraPlan) {
-            recording = await startRunRecording({
-              planId: mastraPlan.planId,
-              listRef: listRefFor(body.listRef, rows, emailColumn),
-              warn: (rowIndex, line) =>
-                send({ type: 'agent_progress', rowIndex, message: line.message, messageType: line.messageType }),
-            });
-          }
+          recording = await startRunRecording({
+            planId: mastraPlan.planId,
+            listRef: listRefFor(body.listRef, rows, emailColumn),
+            warn: (rowIndex, line) =>
+              send({ type: 'agent_progress', rowIndex, message: line.message, messageType: line.messageType }),
+          });
 
           const progress =
             (rowIndex: number) =>
@@ -210,46 +186,33 @@ export async function POST(request: NextRequest) {
 
             try {
               // Enrich the row
-              console.log(`[ENRICHMENT] Processing row ${i + 1}/${rows.length} - Email: ${email} - Strategy: ${strategyName}`);
+              console.log(`[ENRICHMENT] Processing row ${i + 1}/${rows.length} - Email: ${email}`);
               const startTime = Date.now();
 
-              let result: RowEnrichmentResult | null;
+              const onProgress = progress(i);
+              const result: RowEnrichmentResult | null = email
+                ? await enrichRowWithMastra({
+                    sessionId,
+                    rowIndex: i,
+                    row,
+                    email,
+                    plan: mastraPlan.plan,
+                    fields: mastraPlan.fields,
+                    onProgress: (line) => onProgress(line.message, line.messageType, line.sourceUrl),
+                    runs: session.runs,
+                    signal: abortController.signal,
+                    recording: recording ?? undefined,
+                  })
+                : {
+                    rowIndex: i,
+                    originalData: row,
+                    enrichments: {},
+                    status: 'error',
+                    error: 'No email found in specified column',
+                  };
 
-              if (mastraPlan) {
-                const onProgress = progress(i);
-                result = email
-                  ? await enrichRowWithMastra({
-                      sessionId,
-                      rowIndex: i,
-                      row,
-                      email,
-                      plan: mastraPlan.plan,
-                      fields: mastraPlan.fields,
-                      onProgress: (line) => onProgress(line.message, line.messageType, line.sourceUrl),
-                      runs: session.runs,
-                      signal: abortController.signal,
-                      recording: recording ?? undefined,
-                    })
-                  : {
-                      rowIndex: i,
-                      originalData: row,
-                      enrichments: {},
-                      status: 'error',
-                      error: 'No email found in specified column',
-                    };
-
-                // Cancelled: the session reports it; nothing is sent for the row.
-                if (!result) return;
-              } else {
-                // Agent strategies return RowEnrichmentResult
-                result = await enrichmentStrategy.enrichRow(
-                  row,
-                  fields,
-                  emailColumn,
-                  undefined, // onProgress
-                  progress(i)
-                );
-              }
+              // Cancelled: the session reports it; nothing is sent for the row.
+              if (!result) return;
               result.rowIndex = i; // Set the correct row index
 
               const duration = Date.now() - startTime;
@@ -269,7 +232,7 @@ export async function POST(request: NextRequest) {
             } catch (error) {
               // A cancelled Mastra row can surface as an abort error; it is
               // reported by the session, not as a failed row.
-              if (mastraPlan && abortController.signal.aborted) return;
+              if (abortController.signal.aborted) return;
 
               // Send error for this row
               const errorResult: RowEnrichmentResult = {
@@ -318,16 +281,14 @@ export async function POST(request: NextRequest) {
 
             // Wait for at least one to finish before continuing
             if (activePromises.length > 0) {
-              await Promise.race(mastraEngine ? [...activePromises, aborted] : activePromises);
+              await Promise.race([...activePromises, aborted]);
             }
           }
 
           // Mastra runs stop promptly once cancelled; let them settle so their
-          // last writes land before the stream closes. Legacy rows cannot be
-          // stopped, so the legacy path does not wait for them (as before).
-          // The wait is bounded, so a tool that ignores the abort signal cannot
-          // hold the stream open.
-          if (cancelled && mastraEngine) {
+          // last writes land before the stream closes. The wait is bounded, so a
+          // tool that ignores the abort signal cannot hold the stream open.
+          if (cancelled) {
             await Promise.race([
               Promise.allSettled(activePromises),
               new Promise((resolve) => setTimeout(resolve, CANCEL_SETTLE_MS)),

@@ -1,12 +1,10 @@
 /**
  * Shared Firecrawl plumbing for the Mastra tools.
  *
- * Everything here was pulled out of `lib/services/firecrawl.ts`, which each
- * method had its own inline copy of: the same three-attempt exponential
- * backoff, the same list of retryable statuses, the same SSL fallback. The
- * tools need all of it, plus two things the service never had — cancellation
- * and progress reporting — so it lives in one module the tools compose rather
- * than in each tool.
+ * Every tool needs the same three-attempt exponential backoff, the same list of
+ * retryable statuses, the same SSL fallback, cancellation, and progress
+ * reporting, so it lives in one module the tools compose rather than in each
+ * tool.
  *
  * ## Cancellation
  *

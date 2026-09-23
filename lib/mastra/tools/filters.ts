@@ -4,9 +4,8 @@
  * The enrichment pipeline has always refused a handful of domains: their public
  * pages are login walls or bot checks, so a scrape returns chrome rather than
  * facts, and citing one produces a source link a reader cannot open. The rule
- * used to be copy-pasted into five places in
- * `lib/agent-architecture/orchestrator.ts`; it lives here once so the tools, the
- * browser agent, and any later consumer apply the same list.
+ * lives here once so the tools, the browser agent, and any later consumer apply
+ * the same list.
  */
 
 /**

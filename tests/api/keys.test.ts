@@ -14,60 +14,38 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * and must never travel from the client, so every route below is driven with
  * those headers set and checked both ways: with the variable unset the header
  * is ignored and the route answers its configuration error; with it set the
- * route proceeds and the downstream service receives the environment's key,
- * never the header's.
+ * route proceeds and nothing from the headers reaches the work behind it.
  *
- * Handlers are called directly with a `NextRequest`. The services behind them
- * are mocked at the module boundary, so nothing reaches Firecrawl or a model
- * and the tests need neither AIMock nor a network.
+ * Handlers are called directly with a `NextRequest`. The Mastra layer behind
+ * them (the enrich adapter, the chat agent) is mocked at the module boundary,
+ * so nothing reaches Firecrawl or a model and the tests need neither AIMock nor
+ * a network. The model and the Firecrawl tools read their keys from the
+ * environment themselves; there is no key argument to check.
  */
 const {
-  strategyCtor,
+  resolveSessionPlanMock,
+  startRunRecordingMock,
   enrichRowMock,
-  firecrawlServiceCtor,
-  openaiServiceCtor,
-  answerFromTableDataMock,
+  chatStreamMock,
   firecrawlSdkCtor,
   scrapeMock,
 } = vi.hoisted(() => ({
-  strategyCtor: vi.fn(),
+  resolveSessionPlanMock: vi.fn(),
+  startRunRecordingMock: vi.fn(),
   enrichRowMock: vi.fn(),
-  firecrawlServiceCtor: vi.fn(),
-  openaiServiceCtor: vi.fn(),
-  answerFromTableDataMock: vi.fn(),
+  chatStreamMock: vi.fn(),
   firecrawlSdkCtor: vi.fn(),
   scrapeMock: vi.fn(),
 }));
 
-vi.mock('@/lib/strategies/agent-enrichment-strategy', () => ({
-  AgentEnrichmentStrategy: class {
-    constructor(...args: unknown[]) {
-      strategyCtor(...args);
-    }
-    enrichRow = enrichRowMock;
-  },
+vi.mock('@/lib/mastra/enrich-adapter', () => ({
+  resolveSessionPlan: resolveSessionPlanMock,
+  startRunRecording: startRunRecordingMock,
+  enrichRowWithMastra: enrichRowMock,
 }));
 
-vi.mock('@/lib/services/firecrawl', () => ({
-  FirecrawlService: class {
-    constructor(...args: unknown[]) {
-      firecrawlServiceCtor(...args);
-    }
-    search = vi.fn();
-    scrapeUrl = vi.fn();
-  },
-}));
-
-vi.mock('@/lib/services/openai', () => ({
-  OpenAIService: class {
-    constructor(...args: unknown[]) {
-      openaiServiceCtor(...args);
-    }
-    answerFromTableData = answerFromTableDataMock;
-    generateSearchQuery = vi.fn();
-    selectBestSource = vi.fn();
-    generateConversationalResponse = vi.fn();
-  },
+vi.mock('@/lib/mastra', () => ({
+  mastra: { getAgent: () => ({ stream: chatStreamMock }) },
 }));
 
 vi.mock('firecrawl', () => ({
@@ -99,7 +77,7 @@ const BROWSER_HEADERS = {
 };
 
 const ENRICH_BODY = {
-  // Not on `app/fire-enrich/skip-list.txt`, so the row reaches the strategy.
+  // Not on `app/fire-enrich/skip-list.txt`, so the row reaches the adapter.
   rows: [{ email: 'jane@firecrawl.dev' }],
   fields: [
     { name: 'company', displayName: 'Company', description: 'Company name', type: 'string', required: false },
@@ -107,7 +85,6 @@ const ENRICH_BODY = {
   emailColumn: 'email',
 };
 
-// With table data present the chat route answers from it and never searches.
 const CHAT_BODY = {
   question: 'What does Firecrawl do?',
   context: { tableData: 'company,description\nFirecrawl,Web scraping API' },
@@ -149,15 +126,7 @@ afterEach(() => {
     else process.env[key] = saved[key];
   }
   vi.restoreAllMocks();
-  for (const mock of [
-    strategyCtor,
-    enrichRowMock,
-    firecrawlServiceCtor,
-    openaiServiceCtor,
-    answerFromTableDataMock,
-    firecrawlSdkCtor,
-    scrapeMock,
-  ]) {
+  for (const mock of [resolveSessionPlanMock, startRunRecordingMock, enrichRowMock, chatStreamMock, firecrawlSdkCtor, scrapeMock]) {
     mock.mockReset();
   }
 });
@@ -170,7 +139,8 @@ describe('POST /api/enrich', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'Server configuration error: Missing API keys' });
-    expect(strategyCtor).not.toHaveBeenCalled();
+    expect(resolveSessionPlanMock).not.toHaveBeenCalled();
+    expect(enrichRowMock).not.toHaveBeenCalled();
   });
 
   it('answers the configuration error when AI_GATEWAY_API_KEY is unset, whatever the headers carry', async () => {
@@ -180,10 +150,13 @@ describe('POST /api/enrich', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'Server configuration error: Missing API keys' });
-    expect(strategyCtor).not.toHaveBeenCalled();
+    expect(resolveSessionPlanMock).not.toHaveBeenCalled();
+    expect(enrichRowMock).not.toHaveBeenCalled();
   });
 
   it('proceeds with the environment keys and never the header values', async () => {
+    resolveSessionPlanMock.mockResolvedValue({ plan: { fields: [], groups: [] }, fields: ENRICH_BODY.fields });
+    startRunRecordingMock.mockResolvedValue({ finish: vi.fn() });
     enrichRowMock.mockResolvedValue({
       rowIndex: 0,
       originalData: ENRICH_BODY.rows[0],
@@ -197,9 +170,9 @@ describe('POST /api/enrich', () => {
     expect(response.headers.get('content-type')).toBe('text/event-stream');
     // Drains the stream, so the handler runs to its `complete` event.
     expect(await response.text()).toContain('"type":"complete"');
-    expect(strategyCtor).toHaveBeenCalledTimes(1);
-    expect(strategyCtor).toHaveBeenCalledWith('gw-from-env', 'fc-from-env');
+    expect(resolveSessionPlanMock).toHaveBeenCalledTimes(1);
     expect(enrichRowMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(enrichRowMock.mock.calls[0][0])).not.toMatch(/from-browser/);
   });
 });
 
@@ -211,8 +184,7 @@ describe('POST /api/chat', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'Missing API keys' });
-    expect(firecrawlServiceCtor).not.toHaveBeenCalled();
-    expect(openaiServiceCtor).not.toHaveBeenCalled();
+    expect(chatStreamMock).not.toHaveBeenCalled();
   });
 
   it('answers the configuration error when AI_GATEWAY_API_KEY is unset, whatever the headers carry', async () => {
@@ -222,21 +194,23 @@ describe('POST /api/chat', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: 'Missing API keys' });
-    expect(firecrawlServiceCtor).not.toHaveBeenCalled();
-    expect(openaiServiceCtor).not.toHaveBeenCalled();
+    expect(chatStreamMock).not.toHaveBeenCalled();
   });
 
   it('proceeds with the environment keys and never the header values', async () => {
-    answerFromTableDataMock.mockResolvedValue({ found: true, answer: 'Firecrawl scrapes the web.' });
+    chatStreamMock.mockResolvedValue({
+      fullStream: (async function* () {})(),
+      steps: Promise.resolve([{ text: 'Firecrawl scrapes the web.' }]),
+      text: Promise.resolve('Firecrawl scrapes the web.'),
+    });
 
     const response = await chat(post('/api/chat', CHAT_BODY));
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('text/event-stream');
     expect(await response.text()).toContain('"type":"complete"');
-    expect(firecrawlServiceCtor).toHaveBeenCalledWith('fc-from-env');
-    expect(openaiServiceCtor).toHaveBeenCalledWith('gw-from-env');
-    expect(answerFromTableDataMock).toHaveBeenCalledTimes(1);
+    expect(chatStreamMock).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(chatStreamMock.mock.calls[0])).not.toMatch(/from-browser/);
   });
 });
 

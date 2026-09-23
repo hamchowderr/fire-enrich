@@ -19,26 +19,6 @@ export interface EnrichmentRequest {
   useV2Architecture?: boolean;
 }
 
-export interface SearchResult {
-  url: string;
-  title: string;
-  description: string;
-  markdown?: string;
-  html?: string;
-  links?: string[];
-  metadata?: {
-    title?: string;
-    description?: string;
-    keywords?: string;
-    ogTitle?: string;
-    ogDescription?: string;
-    ogImage?: string;
-    author?: string;
-    publishedDate?: string;
-    [key: string]: string | undefined;
-  };
-}
-
 export interface EnrichmentResult {
   field: string;
   value: string | number | boolean | string[];

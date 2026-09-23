@@ -67,8 +67,7 @@ const SCRAPE_TIMEOUT_MS = 30_000;
 /**
  * The v4 SDK types a `search()` web result as `SearchResultWeb | Document`, but
  * when `scrapeOptions` is set the API merges the two shapes onto one object and
- * neither declared type covers the union. Same workaround as
- * `lib/services/firecrawl.ts`.
+ * neither declared type covers the union.
  */
 interface SearchWebItem {
   url?: string;

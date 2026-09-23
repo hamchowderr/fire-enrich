@@ -4,16 +4,9 @@
 
 export const ENRICHMENT_CONFIG = {
   /**
-   * Number of rows to process concurrently
-   * Higher values = faster processing but more API usage
-   * Recommended: 2-5 for most use cases
-   */
-  CONCURRENT_ROWS: 10,
-
-  /**
-   * Rows processed at once by the Mastra engine (`ENRICH_ENGINE=mastra`).
-   * Lower than the legacy value: each row already runs two research groups at
-   * once, and a hosted-agent group holds a Firecrawl job for minutes.
+   * Rows processed at once by the enrichRow workflow. Kept low: each row
+   * already runs two research groups at once, and a hosted-agent group holds a
+   * Firecrawl job for minutes.
    */
   MASTRA_CONCURRENT_ROWS: 5,
 
