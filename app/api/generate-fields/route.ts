@@ -32,7 +32,7 @@ const FEATURE = 'Saved plans';
  *   optional. With `save: true` the plan is also saved under `profileId`
  *   (which is then required) and the response carries `data.planId`.
  * - `{ planId }`: a saved plan, returned as it was saved. The planner is not
- *   called; `prompt`, `goal` and `save` are ignored.
+ *   called; `prompt`, `goal`, `profileId`, `audience` and `save` are ignored.
  *
  * The response keeps the shape the UI already reads, `{ success, data: {
  * fields, interpretation } }` with `fields` as in `lib/types/field-generation`,
@@ -41,7 +41,7 @@ const FEATURE = 'Saved plans';
  * the enrichment run that follows can find it and record which plan it ran.
  */
 const bodySchema = z.object({
-  prompt: z.string().trim().min(1).optional(),
+  prompt: z.string().trim().optional(),
   goal: z.string().trim().min(1).optional(),
   profileId: z.string().trim().min(1).optional(),
   audience: z.string().trim().min(1).optional(),
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
     // A caller naming a profile gets a clear answer when it cannot be used,
     // rather than a plan made silently for the generic one.
     if (profileId) {
-      const unconfigured = requireDolt(FEATURE);
+      const unconfigured = requireDolt(save ? FEATURE : undefined);
       if (unconfigured) return unconfigured;
     }
 
