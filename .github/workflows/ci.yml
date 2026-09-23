@@ -101,4 +101,7 @@ jobs:
             test-results/
             tests/e2e/.logs/
           if-no-files-found: ignore
+          # A re-run of the job uploads under the same name; without this the
+          # upload fails on the artifact the previous attempt left behind.
+          overwrite: true
           retention-days: 14
