@@ -201,7 +201,7 @@ export async function commit(message: string, author: string): Promise<string | 
  * of rows, and the driver flattens one level in some versions. Both shapes are
  * unwrapped here rather than asserting one.
  */
-function readCommitHash(result: unknown): string | null {
+export function readCommitHash(result: unknown): string | null {
   const first = Array.isArray(result) ? result[0] : result;
   const row = Array.isArray(first) ? first[0] : first;
   const hash = (row as { hash?: unknown } | undefined)?.hash;
@@ -213,4 +213,44 @@ function readCommitHash(result: unknown): string | null {
 function isNothingToCommit(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /nothing to commit|no changes added to commit/i.test(message);
+}
+
+/**
+ * The configured database name. Throws when Dolt is not configured, like
+ * {@link query}, so a caller cannot build a revision name from `undefined`.
+ */
+function databaseName(): string {
+  const database = process.env[ENV.database];
+  if (!doltConfigured() || !database) {
+    throw new Error(
+      `Dolt is not configured: set ${ENV.host} and ${ENV.database} (see .env.example).`
+    );
+  }
+  return database;
+}
+
+/**
+ * A dedicated connection outside the pool, optionally on a Dolt branch.
+ *
+ * With `branch` the connection opens the revision database `<db>/<branch>`, so
+ * every statement on it reads and writes that branch's working set, not the
+ * `main` working set the pool's connections share. The branch is fixed for the
+ * connection's life: no `USE` or `DOLT_CHECKOUT` state can leak into a pooled
+ * connection another request picks up next. The caller owns the connection
+ * and must `end()` it.
+ *
+ * `lib/runs.ts` uses it so each enrichment run writes on its own branch, and
+ * one run's `DOLT_COMMIT('-Am')` cannot sweep up another run's rows.
+ */
+export async function connect(branch?: string): Promise<mysql.Connection> {
+  const database = databaseName();
+  // `connectionLimit` is a pool option; a single connection rejects nothing
+  // but has no use for it.
+  const { connectionLimit, ...options } = config();
+  void connectionLimit;
+
+  return mysql.createConnection({
+    ...options,
+    database: branch ? `${database}/${branch}` : database,
+  });
 }
