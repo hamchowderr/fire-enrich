@@ -93,7 +93,7 @@ const CHAT_BODY = {
 
 const SCRAPE_BODY = { url: 'https://firecrawl.dev' };
 
-const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'TURSO_DATABASE_URL', 'DOLT_HOST'] as const;
+const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN', 'TURSO_DATABASE_URL', 'DOLT_HOST'] as const;
 const saved: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
 
 function post(route: string, body: unknown) {
@@ -274,6 +274,17 @@ describe('GET /api/check-env', () => {
     for (const secret of ['fc-secret-value', 'gw-secret-value', 'secret.turso.io', 'dolt.internal']) {
       expect(text).not.toContain(secret);
     }
+  });
+
+  it('counts the Vercel OIDC token as a configured gateway', async () => {
+    for (const key of ENV) delete process.env[key];
+    process.env.VERCEL_OIDC_TOKEN = 'oidc-secret-value';
+
+    const body = await (await checkEnv()).json();
+
+    expect(body.environmentStatus.AI_GATEWAY_API_KEY).toBe(true);
+    expect(body.environmentStatus.OPENAI_API_KEY).toBe(true);
+    expect(JSON.stringify(body)).not.toContain('oidc-secret-value');
   });
 
   it('reports false for every unset variable', async () => {
