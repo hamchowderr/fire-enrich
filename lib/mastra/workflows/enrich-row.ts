@@ -81,11 +81,52 @@ export interface EvidenceEvent {
 }
 
 /**
+ * Written when a research step starts and when it ends.
+ *
+ * A `.foreach` reports its own start once for the whole pass and each item
+ * only once it finishes, so a consumer that wants "group X is searching" needs
+ * the step to say so itself.
+ */
+export interface GroupStartEvent {
+  type: 'group-start';
+  groupId: string;
+  label: string;
+  strategy: ResearchGroupType['strategy'];
+  fieldNames: string[];
+}
+
+export interface GroupCompleteEvent {
+  type: 'group-complete';
+  groupId: string;
+  label: string;
+  fieldNames: string[];
+  /** Fields that ended with a value backed by evidence. */
+  found: number;
+  structuredOutputFailed: boolean;
+}
+
+/**
  * What a research step writes to its stream.
  *
  * @public Part of the workflow's stream contract; the SSE adapter reads it.
  */
-export type EnrichRowStreamEvent = EvidenceEvent | FirecrawlProgressEvent;
+/**
+ * A page a tool result shows was read (see read-urls.ts), once per url per
+ * group. Unlike `firecrawl-progress`, which is written before a fetch, this
+ * only follows a successful read, so it is what citation checks key on.
+ */
+export interface PageReadEvent {
+  type: 'page-read';
+  groupId: string;
+  url: string;
+}
+
+export type EnrichRowStreamEvent =
+  | EvidenceEvent
+  | PageReadEvent
+  | FirecrawlProgressEvent
+  | GroupStartEvent
+  | GroupCompleteEvent;
 
 const WorkflowState = z.object({
   company: CompanyContext.optional(),
@@ -170,6 +211,38 @@ function progressEventsIn(chunk: unknown, depth = 0): FirecrawlProgressEvent[] {
   return payload && 'output' in payload ? progressEventsIn(payload.output, depth + 1) : [];
 }
 
+/**
+ * Drain an agent's stream: forward every Firecrawl progress event to the step
+ * writer tagged with `groupId`, and collect into `readUrls` every url a
+ * successful tool result shows was read (see read-urls.ts). Progress events
+ * are written before a fetch, so they never count as a read.
+ */
+async function forwardStream(
+  fullStream: AsyncIterable<unknown>,
+  writer: { write(data: unknown): Promise<void> },
+  groupId: string,
+  readUrls: Set<string>
+): Promise<void> {
+  for await (const chunk of fullStream) {
+    const type = (chunk as { type?: string }).type;
+
+    if (type === 'tool-output') {
+      for (const event of progressEventsIn(chunk)) {
+        await writer.write({ ...event, groupId } satisfies FirecrawlProgressEvent);
+      }
+    }
+
+    if (type === 'tool-result') {
+      const payload = (chunk as { payload?: { toolName?: string; result?: unknown; isError?: boolean } }).payload;
+      for (const url of payload ? readUrlsFromToolResult(payload) : []) {
+        if (readUrls.has(url)) continue;
+        readUrls.add(url);
+        await writer.write({ type: 'page-read', groupId, url } satisfies PageReadEvent);
+      }
+    }
+  }
+}
+
 function bulletList(items: readonly string[], empty: string): string {
   return items.length > 0 ? items.map((item) => `- ${item}`).join('\n') : empty;
 }
@@ -236,11 +309,11 @@ const identifyStep = createStep({
   inputSchema: ResolvedInput,
   outputSchema: CompanyContext,
   stateSchema: WorkflowState,
-  execute: async ({ inputData, mastra, setState, abortSignal }) => {
+  execute: async ({ inputData, mastra, setState, writer, abortSignal }) => {
     const agent = mastra.getAgent('identify');
     const email = inputData.email.trim();
 
-    const result = await agent.generate(
+    const stream = await agent.stream(
       [
         `Email to identify: ${email}`,
         `Email domain: ${email.split('@')[1] ?? '(none)'}`,
@@ -259,7 +332,9 @@ const identifyStep = createStep({
       }
     );
 
-    const company = CompanyContext.safeParse(result.object);
+    await forwardStream(stream.fullStream, writer, 'identify', new Set());
+
+    const company = CompanyContext.safeParse(await stream.object);
     const context = company.success ? company.data : unidentified(email);
 
     await setState({ company: context });
@@ -310,6 +385,14 @@ function researchGroupStep<TId extends string>(id: TId) {
       const company = state.company ?? item.companyContext;
       const agent = mastra.getAgent('research');
 
+      await writer.write({
+        type: 'group-start',
+        groupId: group.id,
+        label: group.label,
+        strategy: group.strategy,
+        fieldNames: group.fieldNames,
+      } satisfies GroupStartEvent);
+
       const stream = await agent.stream(renderGroupPrompt(item, company), {
         requestContext: requestContextFor(item.researchModel, group.strategy),
         maxSteps: MAX_STEPS[group.strategy],
@@ -334,25 +417,7 @@ function researchGroupStep<TId extends string>(id: TId) {
       });
 
       const readUrls = new Set<string>();
-
-      for await (const chunk of stream.fullStream) {
-        const type = (chunk as { type?: string }).type;
-
-        // Progress is forwarded for the UI only. It is written before a fetch,
-        // so it says nothing about whether the page was read.
-        if (type === 'tool-output') {
-          for (const event of progressEventsIn(chunk)) {
-            await writer.write({ ...event, groupId: group.id } satisfies FirecrawlProgressEvent);
-          }
-        }
-
-        // What was read comes from successful tool results (see read-urls.ts).
-        if (type === 'tool-result') {
-          const payload = (chunk as { payload?: { toolName?: string; result?: unknown; isError?: boolean } })
-            .payload;
-          if (payload) for (const url of readUrlsFromToolResult(payload)) readUrls.add(url);
-        }
-      }
+      await forwardStream(stream.fullStream, writer, group.id, readUrls);
 
       const parsed = PhaseOutput.safeParse(await stream.object);
       const output = parsed.success ? parsed.data : NO_FINDINGS;
@@ -371,6 +436,15 @@ function researchGroupStep<TId extends string>(id: TId) {
           } satisfies EvidenceEvent);
         }
       }
+
+      await writer.write({
+        type: 'group-complete',
+        groupId: group.id,
+        label: group.label,
+        fieldNames: group.fieldNames,
+        found: checked.findings.filter((finding) => finding.value !== null && finding.evidence.length > 0).length,
+        structuredOutputFailed,
+      } satisfies GroupCompleteEvent);
 
       return {
         groupId: group.id,

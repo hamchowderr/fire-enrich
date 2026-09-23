@@ -172,7 +172,7 @@ describe('enrichRow workflow', () => {
 
   it('fills the plan queries from the identified company', async () => {
     const research = (await journal()).find((entry) =>
-      JSON.stringify(entry.body?.messages).includes('Research group: Product and positioning')
+      JSON.stringify(entry.body?.messages).includes('site:firecrawl.dev product')
     );
     const prompt = JSON.stringify(research?.body?.messages);
 

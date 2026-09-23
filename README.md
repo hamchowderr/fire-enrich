@@ -35,6 +35,8 @@ Turn a simple list of emails into a rich dataset with company profiles, funding 
 4. Run the development server: `npm run dev` or `yarn dev`
 5. Open [http://localhost:3000](http://localhost:3000)
 
+Set `ENRICH_ENGINE=mastra` to enrich with the Mastra workflow (plan-driven research groups with cited sources); leave it unset or `legacy` for the original agent pipeline.
+
 ## Example Enrichment
 
 **Before:**

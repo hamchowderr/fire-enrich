@@ -81,7 +81,7 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+`POST /api/enrich` dispatches on `ENRICH_ENGINE`: `mastra` runs the `enrichRow` workflow (`lib/mastra/workflows/enrich-row.ts`) per row through `lib/mastra/enrich-adapter.ts`; anything else (default `legacy`) uses `lib/strategies/agent-enrichment-strategy.ts`.
 
 ## Conventions & Patterns
 
