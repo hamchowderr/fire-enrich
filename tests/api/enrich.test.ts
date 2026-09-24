@@ -408,6 +408,44 @@ describe('POST /api/enrich', () => {
     }
   );
 
+  it(
+    'acts once when both disconnect paths fire: stream cancel() and request signal abort',
+    { timeout: 60_000 },
+    async () => {
+      searchMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(searchFixture), 3_000)));
+      // Watch each row's run, so the test sees how often the session cancels it.
+      const workflow = mastra.getWorkflow('enrichRow');
+      const createRun = workflow.createRun.bind(workflow);
+      const runCancels: Array<ReturnType<typeof vi.fn>> = [];
+      vi.spyOn(workflow, 'createRun').mockImplementation(async (...args) => {
+        const run = await createRun(...args);
+        runCancels.push(vi.spyOn(run, 'cancel') as unknown as ReturnType<typeof vi.fn>);
+        return run;
+      });
+      const client = new AbortController();
+
+      let sessionId = '';
+      let disconnected: Promise<void> | undefined;
+      const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }], client.signal), (event, reader) => {
+        if (event.type === 'session') sessionId = event.sessionId as string;
+        if (event.type === 'agent_progress' && String(event.message).startsWith('Searching the web') && !disconnected) {
+          disconnected = reader.cancel();
+          client.abort();
+        }
+      });
+      await disconnected;
+
+      expect(client.signal.aborted).toBe(true);
+      expect(events.map((event) => event.type)).not.toContain('result');
+      expect(vi.mocked(console.log).mock.calls.filter(([line]) => String(line).includes('Client disconnected'))).toHaveLength(1);
+      // One row, one run, cancelled once.
+      expect(runCancels).toHaveLength(1);
+      expect(runCancels[0]).toHaveBeenCalledOnce();
+      const response = await DELETE(new NextRequest(`http://localhost/api/enrich?sessionId=${sessionId}`, { method: 'DELETE' }));
+      expect(response.status).toBe(404);
+    }
+  );
+
   it('answers 404 to a DELETE for an unknown session', async () => {
     const response = await DELETE(new NextRequest('http://localhost/api/enrich?sessionId=missing', { method: 'DELETE' }));
 

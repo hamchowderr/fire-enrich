@@ -364,12 +364,14 @@ export async function POST(request: NextRequest) {
         } finally {
           activeSessions.delete(sessionId);
           request.signal.removeEventListener('abort', onRequestAbort);
+          // Release the function before closing, so a close that throws
+          // cannot hold it until maxDuration.
+          sessionEnded.resolve();
           // A disconnected client has already closed the stream.
           if (!closed) {
             closed = true;
             controller.close();
           }
-          sessionEnded.resolve();
         }
       },
       async cancel() {
