@@ -132,8 +132,11 @@ export async function select<T = Record<string, unknown>>(
  * Tolerant on purpose: a column that already arrived parsed is passed through,
  * and a string that does not parse is left as-is rather than throwing, so one
  * malformed legacy row cannot take down a list endpoint.
+ *
+ * Exported for rows read on a dedicated {@link connect} connection, which
+ * bypasses {@link select}.
  */
-function parseJsonColumns<T extends Record<string, unknown>>(
+export function parseJsonColumns<T extends Record<string, unknown>>(
   row: T,
   jsonColumns: readonly string[]
 ): T {

@@ -23,10 +23,11 @@ import {
 type RouteContext = { params: Promise<{ id: string }> };
 
 /**
- * The query `PUT` accepts. `merge` is spelled out as `true` or `false` so a
- * typo such as `?merge=ture` is a 400 instead of a silent replace.
+ * The query `PUT` accepts. `merge` is spelled out as `true` or `false`, and the
+ * object is strict, so a typo in the value (`?merge=ture`) or in the name
+ * (`?merg=true`) is a 400 instead of a silent replace.
  */
-const putQuerySchema = z.object({ merge: z.enum(['true', 'false']).optional() });
+const putQuerySchema = z.object({ merge: z.enum(['true', 'false']).optional() }).strict();
 
 /** `GET /api/profiles/:id` */
 export async function GET(_request: NextRequest, context: RouteContext) {
@@ -58,10 +59,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
  * - `audiences` and `default_field_hints` are replaced as without the option.
  *
  * The merge cannot remove a key; send the column without `merge` to replace it.
- * The merged result is validated with the same schema as the body, and a
- * result that fails is a 400 with nothing written or committed. The option is
- * a query parameter rather than a body field so the body stays exactly the
- * profile fields `updateProfileSchema` describes.
+ * The read, the merge and the write run in one transaction, so two concurrent
+ * merges cannot drop each other's keys. The merged result is validated with the
+ * same schema as the body, and a result that fails is a 400 with nothing
+ * written or committed. Any query parameter other than `merge` is a 400.
+ *
+ * The option is a query parameter rather than a body field so the body stays
+ * exactly the profile fields `updateProfileSchema` describes.
  */
 export async function PUT(request: NextRequest, context: RouteContext) {
   const unconfigured = requireDolt();

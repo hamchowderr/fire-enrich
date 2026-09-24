@@ -10,8 +10,9 @@ import { DEFAULT_MODEL_IDS } from '@/lib/mastra/models';
  * actually hides — and the commit that must follow every write.
  */
 const createPool = vi.fn();
+const createConnection = vi.fn();
 
-vi.mock('mysql2/promise', () => ({ default: { createPool } }));
+vi.mock('mysql2/promise', () => ({ default: { createPool, createConnection } }));
 
 const DOLT_ENV = ['DOLT_HOST', 'DOLT_PORT', 'DOLT_USER', 'DOLT_PASSWORD', 'DOLT_DATABASE'] as const;
 const saved: Partial<Record<(typeof DOLT_ENV)[number], string | undefined>> = {};
@@ -36,6 +37,31 @@ function fakePool() {
 
   createPool.mockReturnValue(pool);
   return pool;
+}
+
+/**
+ * A dedicated connection, as `connect()` opens for a merge. Queued like
+ * {@link fakePool}; each call hands out the next one, so a retry gets a fresh
+ * connection with its own call log.
+ */
+function fakeConnection() {
+  const calls: Array<{ sql: string; params: unknown[] }> = [];
+  const results: unknown[] = [];
+
+  const connection = {
+    calls,
+    queue: (...items: unknown[]) => results.push(...items),
+    end: vi.fn(async () => {}),
+    query: vi.fn(async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      const next = results.shift();
+      if (next instanceof Error) throw next;
+      return [next ?? [], []];
+    }),
+  };
+
+  createConnection.mockResolvedValueOnce(connection);
+  return connection;
 }
 
 /**
@@ -89,6 +115,7 @@ beforeEach(() => {
   process.env.DOLT_HOST = '127.0.0.1';
   process.env.DOLT_DATABASE = 'fire_enrich';
   createPool.mockReset();
+  createConnection.mockReset();
 });
 
 afterEach(() => {
@@ -462,22 +489,48 @@ describe('updateProfile with merge', () => {
     crm_defaults: '{"owner":"sales","pipeline":{"stage":"lead","tags":["a","b"]}}',
   };
 
+  /**
+   * Run one successful merge and return the connection it used. The
+   * connection answers START TRANSACTION, the SELECT, the UPDATE and COMMIT;
+   * the pool answers the Dolt commit and the read-back.
+   */
   async function mergedUpdate(patch: Record<string, unknown>) {
     const row = storedRow(MERGE_ROW);
-    const fake = fakePool();
-    fake.queue([row], { affectedRows: 1 }, [[{ hash: 'abc' }]], [row]);
+    const pool = fakePool();
+    pool.queue([[{ hash: 'abc' }]], [row]);
+    const connection = fakeConnection();
+    connection.queue([], [row], { affectedRows: 1 }, []);
     const { updateProfile } = await loadProfiles();
 
     await updateProfile('p1', patch, { merge: true });
 
-    return fake.calls[1];
+    return { pool, connection, update: connection.calls[2] };
   }
 
-  it('merges models per role key', async () => {
-    const { sql, params } = await mergedUpdate({ models: { research: 'openai/gpt-4.1' } });
+  it('reads and writes in one transaction on one connection, then commits to Dolt', async () => {
+    const { pool, connection } = await mergedUpdate({ models: { research: 'openai/gpt-4.1' } });
 
-    expect(sql).toBe('UPDATE profiles SET models = ? WHERE id = ?');
-    expect(JSON.parse(params[0] as string)).toEqual({
+    expect(createConnection).toHaveBeenCalledTimes(1);
+    expect(connection.calls.map((call) => call.sql)).toEqual([
+      'START TRANSACTION',
+      expect.stringMatching(/^SELECT .* FROM profiles WHERE id = \?$/),
+      'UPDATE profiles SET models = ? WHERE id = ?',
+      'COMMIT',
+    ]);
+    expect(connection.calls[1].params).toEqual(['p1']);
+    expect(connection.end).toHaveBeenCalledTimes(1);
+    // The Dolt commit and the read-back run after the SQL COMMIT, on the pool.
+    expect(pool.calls.map((call) => call.sql)).toEqual([
+      "CALL DOLT_COMMIT('-Am', ?, '--author', ?)",
+      expect.stringContaining('SELECT'),
+    ]);
+    expect(pool.calls[0].params[0]).toBe('Update profile p1 (Example Co)');
+  });
+
+  it('merges models per role key', async () => {
+    const { update } = await mergedUpdate({ models: { research: 'openai/gpt-4.1' } });
+
+    expect(JSON.parse(update.params[0] as string)).toEqual({
       planner: 'anthropic/claude-opus-4.5',
       chat: 'openai/gpt-4.1-mini',
       research: 'openai/gpt-4.1',
@@ -485,42 +538,52 @@ describe('updateProfile with merge', () => {
   });
 
   it('lets a sent role overwrite the stored one', async () => {
-    const { params } = await mergedUpdate({ models: { planner: 'openai/gpt-4.1' } });
+    const { update } = await mergedUpdate({ models: { planner: 'openai/gpt-4.1' } });
 
-    expect(JSON.parse(params[0] as string).planner).toBe('openai/gpt-4.1');
+    expect(JSON.parse(update.params[0] as string).planner).toBe('openai/gpt-4.1');
   });
 
   it('merges crm_defaults recursively, replacing arrays and scalars at their key', async () => {
-    const { params } = await mergedUpdate({
+    const { update } = await mergedUpdate({
       crm_defaults: { pipeline: { tags: ['c'] }, region: 'emea' },
     });
 
-    expect(JSON.parse(params[0] as string)).toEqual({
+    expect(JSON.parse(update.params[0] as string)).toEqual({
       owner: 'sales',
       pipeline: { stage: 'lead', tags: ['c'] },
       region: 'emea',
     });
   });
 
-  it('keeps a __proto__ key from parsed JSON away from any prototype', async () => {
-    const { params } = await mergedUpdate({
-      crm_defaults: JSON.parse('{"__proto__":{"polluted":true}}'),
+  /**
+   * Nested, because zod rebuilds the top level of `crm_defaults` and drops a
+   * `__proto__` key there. One level down the value passes through untouched,
+   * so this reaches the recursive merge of `pipeline`. Plain assignment there
+   * would set the merged object's prototype and the key would vanish from the
+   * written JSON.
+   */
+  it('keeps a nested __proto__ key as data rather than a prototype', async () => {
+    const { update } = await mergedUpdate({
+      crm_defaults: JSON.parse('{"pipeline":{"__proto__":{"polluted":true}}}'),
     });
 
+    expect(update.params[0]).toBe(
+      '{"owner":"sales","pipeline":{"stage":"lead","tags":["a","b"],"__proto__":{"polluted":true}}}'
+    );
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-    expect(JSON.parse(params[0] as string).owner).toBe('sales');
   });
 
   it('replaces the array columns and leaves scalar columns as sent', async () => {
-    const { sql, params } = await mergedUpdate({ audiences: ['investors'], offer: 'New offer' });
+    const { update } = await mergedUpdate({ audiences: ['investors'], offer: 'New offer' });
 
-    expect(sql).toBe('UPDATE profiles SET offer = ?, audiences = ? WHERE id = ?');
-    expect(params).toEqual(['New offer', '["investors"]', 'p1']);
+    expect(update.sql).toBe('UPDATE profiles SET offer = ?, audiences = ? WHERE id = ?');
+    expect(update.params).toEqual(['New offer', '["investors"]', 'p1']);
   });
 
-  it('throws a ZodError and writes nothing when the merged result is invalid', async () => {
-    const fake = fakePool();
-    fake.queue([storedRow({ models: '{"plannr":"anthropic/claude-opus-4.5"}' })]);
+  it('rolls back and writes nothing when the merged result is invalid', async () => {
+    const pool = fakePool();
+    const connection = fakeConnection();
+    connection.queue([], [storedRow({ models: '{"plannr":"anthropic/claude-opus-4.5"}' })], []);
     const { updateProfile } = await loadProfiles();
     const { ZodError } = await import('zod');
 
@@ -531,8 +594,98 @@ describe('updateProfile with merge', () => {
     ).catch((thrown) => thrown);
 
     expect(error).toBeInstanceOf(ZodError);
-    expect(fake.calls).toHaveLength(1);
-    expect(fake.calls.some((call) => call.sql.includes('DOLT_COMMIT'))).toBe(false);
+    expect(connection.calls.map((call) => call.sql)).toEqual([
+      'START TRANSACTION',
+      expect.stringContaining('SELECT'),
+      'ROLLBACK',
+    ]);
+    expect(connection.end).toHaveBeenCalledTimes(1);
+    expect(pool.calls).toHaveLength(0);
+  });
+
+  it('rolls back and returns null when the profile is missing', async () => {
+    const pool = fakePool();
+    const connection = fakeConnection();
+    connection.queue([], []);
+    const { updateProfile } = await loadProfiles();
+
+    expect(await updateProfile('missing', { offer: 'x' }, { merge: true })).toBeNull();
+    expect(connection.calls.map((call) => call.sql).at(-1)).toBe('ROLLBACK');
+    expect(connection.end).toHaveBeenCalledTimes(1);
+    expect(pool.calls).toHaveLength(0);
+  });
+
+  it('rolls back a rename onto a taken name and writes no Dolt commit', async () => {
+    const pool = fakePool();
+    const connection = fakeConnection();
+    connection.queue([], [storedRow(MERGE_ROW)], duplicateNameError());
+    const { updateProfile, ProfileNameTakenError } = await loadProfiles();
+
+    const error = await updateProfile('p1', { name: 'Second Co' }, { merge: true }).catch(
+      (thrown) => thrown
+    );
+
+    expect(error).toBeInstanceOf(ProfileNameTakenError);
+    expect(error.profileName).toBe('Second Co');
+    expect(connection.calls.map((call) => call.sql).at(-1)).toBe('ROLLBACK');
+    expect(connection.end).toHaveBeenCalledTimes(1);
+    expect(pool.calls).toHaveLength(0);
+  });
+
+  /**
+   * The lost-update case: another merge committed a key between this one's
+   * read and its COMMIT. Dolt refuses the COMMIT, and the retry re-reads the
+   * row, so the other writer's key survives in what is finally written.
+   */
+  it('retries on a serialization failure and merges on top of the winning write', async () => {
+    const winner = storedRow({
+      models: '{"planner":"anthropic/claude-opus-4.5","chat":"openai/gpt-4.1-mini","research":"x/other"}',
+    });
+    const pool = fakePool();
+    pool.queue([[{ hash: 'abc' }]], [winner]);
+    const first = fakeConnection();
+    first.queue(
+      [],
+      [storedRow(MERGE_ROW)],
+      { affectedRows: 1 },
+      new Error(
+        'serialization failure: this transaction conflicts with a committed transaction from another client, try restarting transaction.'
+      )
+    );
+    const second = fakeConnection();
+    second.queue([], [winner], { affectedRows: 1 }, []);
+    const { updateProfile } = await loadProfiles();
+
+    await updateProfile('p1', { models: { planner: 'openai/gpt-4.1' } }, { merge: true });
+
+    expect(first.calls.map((call) => call.sql).slice(-2)).toEqual(['COMMIT', 'ROLLBACK']);
+    expect(first.end).toHaveBeenCalledTimes(1);
+    expect(second.end).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(second.calls[2].params[0] as string)).toEqual({
+      planner: 'openai/gpt-4.1',
+      chat: 'openai/gpt-4.1-mini',
+      research: 'x/other',
+    });
+    expect(pool.calls.filter((call) => call.sql.includes('DOLT_COMMIT'))).toHaveLength(1);
+  });
+
+  it('gives up after three serialization failures and commits nothing', async () => {
+    const pool = fakePool();
+    const conflict = () =>
+      new Error('serialization failure: this transaction conflicts, try restarting transaction.');
+    const connections = [1, 2, 3].map(() => {
+      const connection = fakeConnection();
+      connection.queue([], [storedRow(MERGE_ROW)], { affectedRows: 1 }, conflict());
+      return connection;
+    });
+    const { updateProfile } = await loadProfiles();
+
+    await expect(
+      updateProfile('p1', { models: { research: 'openai/gpt-4.1' } }, { merge: true })
+    ).rejects.toThrow('serialization failure');
+    expect(createConnection).toHaveBeenCalledTimes(3);
+    for (const connection of connections) expect(connection.end).toHaveBeenCalledTimes(1);
+    expect(pool.calls).toHaveLength(0);
   });
 });
 
