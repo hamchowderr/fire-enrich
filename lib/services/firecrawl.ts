@@ -1,11 +1,26 @@
-import FirecrawlApp from '@mendable/firecrawl-js';
+import { Firecrawl } from 'firecrawl';
+import type { SearchRequest } from 'firecrawl';
 import type { SearchResult } from '../types';
 
+// The v4 SDK types `search()`'s `web` results as `SearchResultWeb | Document`,
+// but when scraping is requested the API merges both shapes onto one object
+// (url/title/description alongside markdown/html/links/metadata) even though
+// the SDK's Document type doesn't declare the search-only fields.
+interface SearchWebItem {
+  url?: string;
+  title?: string;
+  description?: string;
+  markdown?: string;
+  html?: string;
+  links?: string[];
+  metadata?: SearchResult['metadata'];
+}
+
 export class FirecrawlService {
-  private app: FirecrawlApp;
+  private app: Firecrawl;
 
   constructor(apiKey: string) {
-    this.app = new FirecrawlApp({ apiKey });
+    this.app = new Firecrawl({ apiKey });
   }
 
   async search(
@@ -22,7 +37,7 @@ export class FirecrawlService {
       try {
         const { limit = 5, scrapeContent = true } = options;
 
-        const searchOptions: Record<string, unknown> = { limit };
+        const searchOptions: Omit<SearchRequest, 'query'> = { limit };
         
         if (scrapeContent) {
           searchOptions.scrapeOptions = {
@@ -31,28 +46,29 @@ export class FirecrawlService {
         }
 
         const result = await this.app.search(query, searchOptions);
+        const webResults = (result.web || []) as SearchWebItem[];
 
-        return result.data.map((item) => ({
-          url: item.url || '',
-          title: item.title || '',
-          description: item.description || '',
+        return webResults.map((item) => ({
+          url: item.url || item.metadata?.url || item.metadata?.sourceURL || '',
+          title: item.title || item.metadata?.title || '',
+          description: item.description || item.metadata?.description || '',
           markdown: item.markdown,
           html: item.html,
           links: item.links,
           metadata: item.metadata,
         }));
       } catch (error) {
-        const errorWithStatus = error as { statusCode?: number; message?: string };
+        const errorWithStatus = error as { status?: number; message?: string };
         const isRetryableError = 
-          errorWithStatus?.statusCode === 502 || 
-          errorWithStatus?.statusCode === 503 || 
-          errorWithStatus?.statusCode === 504 ||
-          errorWithStatus?.statusCode === 429;
+          errorWithStatus?.status === 502 ||
+          errorWithStatus?.status === 503 ||
+          errorWithStatus?.status === 504 ||
+          errorWithStatus?.status === 429;
         
         if (isRetryableError && attempt < maxRetries - 1) {
           const delay = baseDelay * Math.pow(2, attempt);
           console.warn(`Firecrawl search failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
-          console.warn('Error:', errorWithStatus?.statusCode || errorWithStatus?.message);
+          console.warn('Error:', errorWithStatus?.status || errorWithStatus?.message);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
@@ -108,29 +124,29 @@ export class FirecrawlService {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         // First try with normal TLS verification
-        const result = await this.app.scrapeUrl(fullUrl, {
+        const document = await this.app.scrape(fullUrl, {
           formats: ['markdown', 'html'],
           timeout: 30000, // 30 second timeout
         });
         
-        return result;
+        return { data: { markdown: document.markdown, html: document.html } };
       } catch (error) {
         // Check if it's an SSL error
-        const errorWithMessage = error as { message?: string; statusCode?: number };
+        const errorWithMessage = error as { message?: string; status?: number };
         const isSSLError = errorWithMessage?.message?.includes('SSL error') || 
                           errorWithMessage?.message?.includes('certificate') ||
-                          errorWithMessage?.statusCode === 500 && errorWithMessage?.message?.includes('SSL');
+                          errorWithMessage?.status === 500 && errorWithMessage?.message?.includes('SSL');
         
         // If SSL error, retry with skipTlsVerification
         if (isSSLError && attempt === 0) {
           try {
             console.warn(`SSL error for ${fullUrl}, retrying with skipTlsVerification...`);
-            const result = await this.app.scrapeUrl(fullUrl, {
+            const document = await this.app.scrape(fullUrl, {
               formats: ['markdown', 'html'],
               skipTlsVerification: true,
               timeout: 30000,
             });
-            return result;
+            return { data: { markdown: document.markdown, html: document.html } };
           } catch (retryError) {
             // Continue to normal retry logic
             error = retryError;
@@ -138,17 +154,17 @@ export class FirecrawlService {
         }
         
         const isRetryableError = 
-          errorWithMessage?.statusCode === 502 || 
-          errorWithMessage?.statusCode === 503 || 
-          errorWithMessage?.statusCode === 504 ||
-          errorWithMessage?.statusCode === 429 ||
+          errorWithMessage?.status === 502 ||
+          errorWithMessage?.status === 503 ||
+          errorWithMessage?.status === 504 ||
+          errorWithMessage?.status === 429 ||
           errorWithMessage?.message?.includes('network error') ||
           errorWithMessage?.message?.includes('server is unreachable');
         
         if (isRetryableError && attempt < maxRetries - 1) {
           const delay = baseDelay * Math.pow(2, attempt);
           console.warn(`Firecrawl scrape failed for ${fullUrl} (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
-          console.warn('Error:', errorWithMessage?.statusCode || errorWithMessage?.message);
+          console.warn('Error:', errorWithMessage?.status || errorWithMessage?.message);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
