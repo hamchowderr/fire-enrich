@@ -557,6 +557,37 @@ describe('with Dolt configured', () => {
       expect(pool.calls).toHaveLength(0);
     });
 
+    it('answers 409 with a retry hint when every merge attempt loses the race', async () => {
+      const pool = fakePool();
+      const connections = [1, 2, 3].map(() => {
+        const connection = fakeConnection();
+        connection.queue(
+          [],
+          [storedRow(MERGE_ROW)],
+          { affectedRows: 1 },
+          new Error(
+            'serialization failure: this transaction conflicts with a committed transaction from another client, try restarting transaction.'
+          )
+        );
+        return connection;
+      });
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merge=true'),
+        context('p1')
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body.error).toContain('p1');
+      expect(body.error).toMatch(/retry the request/);
+      for (const connection of connections) {
+        expect(connection.calls.map((call) => call.sql).at(-1)).toBe('ROLLBACK');
+      }
+      expect(pool.calls).toHaveLength(0);
+    });
+
     it('answers 400 for a merge value other than true or false, before touching Dolt', async () => {
       const fake = fakePool();
       const { item } = await loadRoutes();

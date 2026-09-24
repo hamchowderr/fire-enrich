@@ -11,6 +11,7 @@ import {
 import {
   deleteProfile,
   getProfile,
+  ProfileMergeConflictError,
   ProfileNameTakenError,
   updateProfile,
   updateProfileSchema,
@@ -60,7 +61,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
  *
  * The merge cannot remove a key; send the column without `merge` to replace it.
  * The read, the merge and the write run in one transaction, so two concurrent
- * merges cannot drop each other's keys. The merged result is validated with the
+ * merges cannot drop each other's keys. A merge that collides with another
+ * writer is retried from a fresh read. If it collides on every attempt, the
+ * answer is a 409 with nothing written, and the client can repeat the request. The merged result is validated with the
  * same schema as the body, and a result that fails is a 400 with nothing
  * written or committed. Any query parameter other than `merge` is a 400.
  *
@@ -87,6 +90,9 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     return profile ? NextResponse.json({ profile }) : notFound(id);
   } catch (error) {
     if (error instanceof ProfileNameTakenError) return conflict(error);
+    if (error instanceof ProfileMergeConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     // Only the merged result can fail here: the body passed the same schema above.
     if (error instanceof ZodError) return badRequest(error);
     throw error;

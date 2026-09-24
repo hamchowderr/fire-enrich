@@ -678,14 +678,48 @@ describe('updateProfile with merge', () => {
       connection.queue([], [storedRow(MERGE_ROW)], { affectedRows: 1 }, conflict());
       return connection;
     });
-    const { updateProfile } = await loadProfiles();
+    const { updateProfile, ProfileMergeConflictError } = await loadProfiles();
 
-    await expect(
-      updateProfile('p1', { models: { research: 'openai/gpt-4.1' } }, { merge: true })
-    ).rejects.toThrow('serialization failure');
+    const error = await updateProfile(
+      'p1',
+      { models: { research: 'openai/gpt-4.1' } },
+      { merge: true }
+    ).catch((thrown) => thrown);
+
+    expect(error).toBeInstanceOf(ProfileMergeConflictError);
+    expect(error.profileId).toBe('p1');
+    expect(error.message).toMatch(/retry the request/);
+    expect(error.cause.message).toMatch(/serialization failure/);
     expect(createConnection).toHaveBeenCalledTimes(3);
     for (const connection of connections) expect(connection.end).toHaveBeenCalledTimes(1);
     expect(pool.calls).toHaveLength(0);
+  });
+
+  /**
+   * Once the SQL COMMIT has landed the merge is applied. A failure in the Dolt
+   * commit after it must surface as it is, not replay the merge on top of
+   * itself.
+   */
+  it('does not retry a serialization failure raised after the SQL COMMIT', async () => {
+    const pool = fakePool();
+    pool.queue(new Error('serialization failure: try restarting transaction.'));
+    const connection = fakeConnection();
+    connection.queue([], [storedRow(MERGE_ROW)], { affectedRows: 1 }, []);
+    const { updateProfile, ProfileMergeConflictError } = await loadProfiles();
+
+    const error = await updateProfile(
+      'p1',
+      { models: { research: 'openai/gpt-4.1' } },
+      { merge: true }
+    ).catch((thrown) => thrown);
+
+    expect(error).not.toBeInstanceOf(ProfileMergeConflictError);
+    expect(error.message).toMatch(/serialization failure/);
+    expect(createConnection).toHaveBeenCalledTimes(1);
+    expect(connection.calls.map((call) => call.sql).at(-1)).toBe('COMMIT');
+    expect(pool.calls.map((call) => call.sql)).toEqual([
+      "CALL DOLT_COMMIT('-Am', ?, '--author', ?)",
+    ]);
   });
 });
 

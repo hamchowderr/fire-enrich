@@ -292,6 +292,8 @@ export async function createProfile(input: CreateProfileInput): Promise<Profile>
  * @throws {ZodError} when the patch, or with `merge` the merged result, is
  *   invalid. Nothing is written or committed.
  * @throws {ProfileNameTakenError} when the patch renames onto a name in use.
+ * @throws {ProfileMergeConflictError} when a merge lost every retry to
+ *   concurrent writers of the same profile.
  */
 export async function updateProfile(
   id: string,
@@ -340,6 +342,24 @@ function isSerializationFailure(error: unknown): boolean {
 }
 
 /**
+ * Every attempt of a merge lost the race to another writer of the same
+ * profile. Nothing was written. The request is safe to repeat: a repeat reads
+ * the row again and merges on top of whatever the other writers left.
+ */
+export class ProfileMergeConflictError extends Error {
+  readonly profileId: string;
+
+  constructor(profileId: string, cause: unknown) {
+    super(
+      `Profile ${profileId} was changed by another request during each of ${MERGE_ATTEMPTS} merge attempts. Nothing was written; retry the request.`,
+      { cause }
+    );
+    this.name = 'ProfileMergeConflictError';
+    this.profileId = profileId;
+  }
+}
+
+/**
  * The merge path of {@link updateProfile}: read, merge and write in one SQL
  * transaction, retried when Dolt reports that another writer got there first.
  *
@@ -353,32 +373,49 @@ function isSerializationFailure(error: unknown): boolean {
  * set the same key to different values collide, the later `COMMIT` fails with
  * a serialization failure, and the retry reads the winner's row and merges on
  * top of it.
+ *
+ * Only the transaction is retried. The Dolt commit and the read-back run once,
+ * after a transaction has committed: by then the merge is applied, and
+ * replaying it would apply it again on top of itself.
+ *
+ * @throws {ProfileMergeConflictError} when every attempt lost the race.
  */
 async function mergeProfile(id: string, patch: UpdateProfileInput): Promise<Profile | null> {
+  let profileName: string | null;
+
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await mergeProfileOnce(id, patch);
+      profileName = await mergeTransaction(id, patch);
+      break;
     } catch (error) {
-      if (attempt >= MERGE_ATTEMPTS || !isSerializationFailure(error)) throw error;
+      if (!isSerializationFailure(error)) throw error;
+      if (attempt >= MERGE_ATTEMPTS) throw new ProfileMergeConflictError(id, error);
     }
   }
+
+  if (profileName === null) return null;
+
+  await commit(`Update profile ${id} (${profileName})`, COMMIT_AUTHOR);
+
+  return getProfile(id);
 }
 
 /**
- * One attempt of {@link mergeProfile}, on a dedicated connection so every
- * statement of the transaction runs in the same session. The pool would hand
- * each statement to whichever connection is free.
+ * One attempt of {@link mergeProfile}: `START TRANSACTION`, `SELECT`, `UPDATE`,
+ * `COMMIT`, on a dedicated connection so every statement runs in the same
+ * session. The pool would hand each statement to whichever connection is
+ * free.
  *
- * A missing row, an invalid merged result or a rejected write rolls back, so
- * nothing is written. The Dolt commit runs only after the SQL `COMMIT`
- * succeeded.
+ * Returns the profile's name as read, for the commit message, or `null` when
+ * no row has that id. A missing row, an invalid merged result or a rejected
+ * write rolls back, so nothing is written.
  */
-async function mergeProfileOnce(id: string, patch: UpdateProfileInput): Promise<Profile | null> {
+async function mergeTransaction(id: string, patch: UpdateProfileInput): Promise<string | null> {
   const connection = await connect();
-  let existingName: string;
 
   try {
     await connection.query('START TRANSACTION');
+    let existingName: string | undefined;
     let merged: UpdateProfileInput | undefined;
 
     try {
@@ -395,21 +432,19 @@ async function mergeProfileOnce(id: string, patch: UpdateProfileInput): Promise<
       const { sql, params } = buildUpdate(id, merged);
       await connection.query(sql, params);
       await connection.query('COMMIT');
+
+      return existingName;
     } catch (error) {
       await connection.query('ROLLBACK').catch(() => undefined);
       // As in the replace path: report the name the row would have ended up with.
       if (isDuplicateName(error)) {
-        throw new ProfileNameTakenError(merged?.name ?? existingName);
+        throw new ProfileNameTakenError(merged?.name ?? existingName ?? id);
       }
       throw error;
     }
   } finally {
     await connection.end().catch(() => undefined);
   }
-
-  await commit(`Update profile ${id} (${existingName})`, COMMIT_AUTHOR);
-
-  return getProfile(id);
 }
 
 /** Delete a profile and commit it. `false` when no row had that id. */
