@@ -383,6 +383,135 @@ describe('with Dolt configured', () => {
     });
   });
 
+  describe('PUT /api/profiles/:id?merge=true', () => {
+    /** A stored row with two model overrides and a nested CRM default. */
+    const MERGE_ROW = {
+      models: '{"planner":"anthropic/claude-opus-4.5","chat":"openai/gpt-4.1-mini"}',
+      crm_defaults: '{"owner":"sales","pipeline":{"stage":"lead","source":"web"}}',
+    };
+
+    function putWithQuery(id: string, body: unknown, search: string) {
+      return new NextRequest(`http://127.0.0.1/api/profiles/${id}?${search}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    /** The UPDATE the handler sent, found by its SQL rather than its position. */
+    function updateCall(fake: ReturnType<typeof fakePool>) {
+      return fake.calls.find((call) => call.sql.startsWith('UPDATE profiles'));
+    }
+
+    it('merges one model role into the stored overrides and returns all three', async () => {
+      const all = {
+        planner: 'anthropic/claude-opus-4.5',
+        chat: 'openai/gpt-4.1-mini',
+        research: 'openai/gpt-4.1',
+      };
+      const fake = fakePool();
+      fake.queue(
+        [storedRow(MERGE_ROW)],
+        { affectedRows: 1 },
+        [[{ hash: 'abc' }]],
+        [storedRow({ ...MERGE_ROW, models: JSON.stringify(all) })]
+      );
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merge=true'),
+        context('p1')
+      );
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).profile.models).toEqual(all);
+      expect(JSON.parse(updateCall(fake)?.params[0] as string)).toEqual(all);
+      expect(commits(fake)).toHaveLength(1);
+    });
+
+    it('merges a nested crm_defaults key and keeps its siblings', async () => {
+      const fake = fakePool();
+      fake.queue([storedRow(MERGE_ROW)], { affectedRows: 1 }, [[{ hash: 'abc' }]], [
+        storedRow(MERGE_ROW),
+      ]);
+      const { item } = await loadRoutes();
+
+      await item.PUT(
+        putWithQuery('p1', { crm_defaults: { pipeline: { stage: 'qualified' } } }, 'merge=true'),
+        context('p1')
+      );
+
+      expect(JSON.parse(updateCall(fake)?.params[0] as string)).toEqual({
+        owner: 'sales',
+        pipeline: { stage: 'qualified', source: 'web' },
+      });
+    });
+
+    it('still replaces the array columns whole', async () => {
+      const fake = fakePool();
+      fake.queue([storedRow()], { affectedRows: 1 }, [[{ hash: 'abc' }]], [storedRow()]);
+      const { item } = await loadRoutes();
+
+      await item.PUT(putWithQuery('p1', { audiences: ['investors'] }, 'merge=true'), context('p1'));
+
+      expect(updateCall(fake)?.params).toEqual(['["investors"]', 'p1']);
+    });
+
+    it('replaces the column whole without the option, and with merge=false', async () => {
+      for (const search of ['', 'merge=false']) {
+        const fake = fakePool();
+        fake.queue([storedRow(MERGE_ROW)], { affectedRows: 1 }, [[{ hash: 'abc' }]], [
+          storedRow(MERGE_ROW),
+        ]);
+        const { item } = await loadRoutes();
+
+        await item.PUT(
+          putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, search),
+          context('p1')
+        );
+
+        expect(updateCall(fake)?.params).toEqual(['{"research":"openai/gpt-4.1"}', 'p1']);
+      }
+    });
+
+    it('answers 400 and writes nothing when the merged result is invalid', async () => {
+      const fake = fakePool();
+      // A stored override for a role the schema does not know, as a row written
+      // before `models` was closed to unknown keys would hold.
+      fake.queue([storedRow({ models: '{"plannr":"anthropic/claude-opus-4.5"}' })]);
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merge=true'),
+        context('p1')
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toBe('Invalid profile');
+      expect(body.issues[0].path).toEqual(['models']);
+      expect(fake.calls).toHaveLength(1);
+      expect(fake.calls[0].sql).toContain('SELECT');
+      expect(commits(fake)).toHaveLength(0);
+    });
+
+    it('answers 400 for a merge value other than true or false, before touching Dolt', async () => {
+      const fake = fakePool();
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merge=yes'),
+        context('p1')
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toBe('Invalid query');
+      expect(body.issues[0].path).toEqual(['merge']);
+      expect(fake.calls).toHaveLength(0);
+    });
+  });
+
   describe('DELETE /api/profiles/:id', () => {
     it('deletes, commits, and answers 200', async () => {
       const fake = fakePool();

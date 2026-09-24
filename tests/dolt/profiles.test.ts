@@ -456,6 +456,86 @@ describe('updateProfile', () => {
   });
 });
 
+describe('updateProfile with merge', () => {
+  const MERGE_ROW = {
+    models: '{"planner":"anthropic/claude-opus-4.5","chat":"openai/gpt-4.1-mini"}',
+    crm_defaults: '{"owner":"sales","pipeline":{"stage":"lead","tags":["a","b"]}}',
+  };
+
+  async function mergedUpdate(patch: Record<string, unknown>) {
+    const row = storedRow(MERGE_ROW);
+    const fake = fakePool();
+    fake.queue([row], { affectedRows: 1 }, [[{ hash: 'abc' }]], [row]);
+    const { updateProfile } = await loadProfiles();
+
+    await updateProfile('p1', patch, { merge: true });
+
+    return fake.calls[1];
+  }
+
+  it('merges models per role key', async () => {
+    const { sql, params } = await mergedUpdate({ models: { research: 'openai/gpt-4.1' } });
+
+    expect(sql).toBe('UPDATE profiles SET models = ? WHERE id = ?');
+    expect(JSON.parse(params[0] as string)).toEqual({
+      planner: 'anthropic/claude-opus-4.5',
+      chat: 'openai/gpt-4.1-mini',
+      research: 'openai/gpt-4.1',
+    });
+  });
+
+  it('lets a sent role overwrite the stored one', async () => {
+    const { params } = await mergedUpdate({ models: { planner: 'openai/gpt-4.1' } });
+
+    expect(JSON.parse(params[0] as string).planner).toBe('openai/gpt-4.1');
+  });
+
+  it('merges crm_defaults recursively, replacing arrays and scalars at their key', async () => {
+    const { params } = await mergedUpdate({
+      crm_defaults: { pipeline: { tags: ['c'] }, region: 'emea' },
+    });
+
+    expect(JSON.parse(params[0] as string)).toEqual({
+      owner: 'sales',
+      pipeline: { stage: 'lead', tags: ['c'] },
+      region: 'emea',
+    });
+  });
+
+  it('keeps a __proto__ key from parsed JSON away from any prototype', async () => {
+    const { params } = await mergedUpdate({
+      crm_defaults: JSON.parse('{"__proto__":{"polluted":true}}'),
+    });
+
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(JSON.parse(params[0] as string).owner).toBe('sales');
+  });
+
+  it('replaces the array columns and leaves scalar columns as sent', async () => {
+    const { sql, params } = await mergedUpdate({ audiences: ['investors'], offer: 'New offer' });
+
+    expect(sql).toBe('UPDATE profiles SET offer = ?, audiences = ? WHERE id = ?');
+    expect(params).toEqual(['New offer', '["investors"]', 'p1']);
+  });
+
+  it('throws a ZodError and writes nothing when the merged result is invalid', async () => {
+    const fake = fakePool();
+    fake.queue([storedRow({ models: '{"plannr":"anthropic/claude-opus-4.5"}' })]);
+    const { updateProfile } = await loadProfiles();
+    const { ZodError } = await import('zod');
+
+    const error = await updateProfile(
+      'p1',
+      { models: { research: 'openai/gpt-4.1' } },
+      { merge: true }
+    ).catch((thrown) => thrown);
+
+    expect(error).toBeInstanceOf(ZodError);
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls.some((call) => call.sql.includes('DOLT_COMMIT'))).toBe(false);
+  });
+});
+
 describe('deleteProfile', () => {
   it('deletes and commits when the profile exists', async () => {
     const fake = fakePool();

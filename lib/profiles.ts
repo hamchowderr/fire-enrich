@@ -127,6 +127,69 @@ function buildUpdate(
   return { sql: `UPDATE profiles SET ${assignments.join(', ')} WHERE id = ?`, params };
 }
 
+/** How {@link updateProfile} applies a patch. */
+export interface UpdateProfileOptions {
+  /**
+   * Merge the object columns into the stored values instead of replacing them.
+   *
+   * `models` merges per role key and `crm_defaults` merges recursively through
+   * plain objects. Every other field, the arrays included, is replaced as
+   * without the option: there is no way to address one element of a list of
+   * strings, so a merge of `audiences` could only append, and an editor that
+   * removes an audience would have no way to say so.
+   */
+  merge?: boolean;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merge `patch` into `base` through nested plain objects; any other value in
+ * `patch` (an array, a scalar, `null`) replaces what `base` held at that key.
+ *
+ * Returns a new object and leaves both inputs alone. Keys are defined rather
+ * than assigned so a `__proto__` key from parsed JSON stays an ordinary own
+ * property instead of reaching the prototype setter.
+ */
+function deepMerge(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base };
+
+  for (const [key, value] of Object.entries(patch)) {
+    const current = Object.hasOwn(merged, key) ? merged[key] : undefined;
+    Object.defineProperty(merged, key, {
+      value: isPlainObject(current) && isPlainObject(value) ? deepMerge(current, value) : value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+
+  return merged;
+}
+
+/**
+ * The patch with its object columns merged into the stored profile.
+ *
+ * `models` is flat (role to model id), so a key-level spread is the whole
+ * merge. The result still has to pass {@link updateProfileSchema}: the stored
+ * half never went through this request's validation.
+ */
+function mergeIntoStored(existing: Profile, patch: UpdateProfileInput): UpdateProfileInput {
+  const merged = { ...patch };
+
+  if (patch.models) merged.models = { ...(existing.models ?? {}), ...patch.models };
+  if (patch.crm_defaults) {
+    merged.crm_defaults = deepMerge(existing.crm_defaults ?? {}, patch.crm_defaults);
+  }
+
+  return merged;
+}
+
 /**
  * A write collided with the `UNIQUE` index on `profiles.name`.
  *
@@ -221,16 +284,24 @@ export async function createProfile(input: CreateProfileInput): Promise<Profile>
  * rather than an `UPDATE` that reports zero affected rows — which is also what a
  * patch that changes nothing reports, and the two mean different things.
  *
+ * With `options.merge`, the object columns are merged into the stored values
+ * (see {@link UpdateProfileOptions}) and the merged result is validated again
+ * before anything is written.
+ *
+ * @throws {ZodError} when the patch, or with `merge` the merged result, is
+ *   invalid. Nothing is written or committed.
  * @throws {ProfileNameTakenError} when the patch renames onto a name in use.
  */
 export async function updateProfile(
   id: string,
-  patch: UpdateProfileInput
+  patch: UpdateProfileInput,
+  options: UpdateProfileOptions = {}
 ): Promise<Profile | null> {
   const existing = await getProfile(id);
   if (!existing) return null;
 
-  const validated = updateProfileSchema.parse(patch);
+  let validated = updateProfileSchema.parse(patch);
+  if (options.merge) validated = updateProfileSchema.parse(mergeIntoStored(existing, validated));
   const { sql, params } = buildUpdate(id, validated);
 
   try {
