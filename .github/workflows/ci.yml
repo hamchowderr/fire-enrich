@@ -51,8 +51,8 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
 
-      # typecheck, next lint, mastra lint and the Fallow dead-code gate, in
-      # that order; the first failure stops the chain.
+      # The lockfile guard, typecheck, next lint, mastra lint and the Fallow
+      # dead-code gate, in that order; the first failure stops the chain.
       - name: Check
         run: npm run check
 
@@ -78,6 +78,12 @@ jobs:
         run: npm run build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+
+      # Next rewrites package-lock.json when an @next/swc-* binary is missing
+      # from it, but only outside CI, so `npm run check:lockfile` above is what
+      # catches that here. This step catches any other build-time rewrite.
+      - name: Lockfile unchanged by the build
+        run: git diff --exit-code package-lock.json
 
       # The browser tier, against the build above (`E2E_SKIP_BUILD=1` makes the
       # Playwright config serve `.next` instead of building again). The config
