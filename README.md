@@ -32,6 +32,7 @@ Turn a simple list of emails into a rich dataset with company profiles, funding 
    FIRECRAWL_API_KEY=your_firecrawl_key
    AI_GATEWAY_API_KEY=your_ai_gateway_key
    ```
+   `AI_GATEWAY_API_KEY` is for local development; on Vercel the deployment's OIDC token authenticates the gateway, so no key is set there.
 3. Install dependencies: `npm install` or `yarn install`
 4. Run the development server: `npm run dev` or `yarn dev`
 5. Open [http://localhost:3000](http://localhost:3000)

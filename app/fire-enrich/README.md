@@ -116,6 +116,7 @@ npm install
 FIRECRAWL_API_KEY=your_firecrawl_key
 AI_GATEWAY_API_KEY=your_ai_gateway_key
 ```
+`AI_GATEWAY_API_KEY` is for local development; on Vercel the deployment's OIDC token authenticates the gateway, so no key is set there.
 
 4. Run the development server:
 ```bash
