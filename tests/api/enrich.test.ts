@@ -1,5 +1,6 @@
 /**
- * `POST /api/enrich` and `DELETE /api/enrich` through the route handler.
+ * `POST /api/enrich` and `DELETE /api/enrich` through the route handler,
+ * including a client that disconnects without a DELETE.
  *
  * The route runs the enrichRow workflow for every row: every model call is answered by AIMock (`fixtures/identify-company.json`,
  * `fixtures/research-group.json`) and Firecrawl is mocked at the SDK boundary
@@ -61,6 +62,7 @@ vi.mock('firecrawl', () => ({
 }));
 
 import { DELETE, POST } from '@/app/api/enrich/route';
+import { ENRICHMENT_CONFIG } from '@/lib/config/enrichment';
 import { mastra } from '@/lib/mastra';
 import { putPlan } from '@/lib/mastra/plan-cache';
 import type { ResearchPlanType } from '@/lib/mastra/schemas';
@@ -119,8 +121,14 @@ function post(rows: Array<Record<string, string>>): Promise<Response> {
   );
 }
 
-/** Read an SSE response to the end, calling `onEvent` as each event arrives. */
-async function readEvents(response: Response, onEvent?: (event: Event) => void): Promise<Event[]> {
+/**
+ * Read an SSE response to the end, calling `onEvent` as each event arrives.
+ * `onEvent` gets the reader too, so a test can cancel it as a closed tab would.
+ */
+async function readEvents(
+  response: Response,
+  onEvent?: (event: Event, reader: ReadableStreamDefaultReader<Uint8Array>) => void
+): Promise<Event[]> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   const events: Event[] = [];
@@ -138,7 +146,7 @@ async function readEvents(response: Response, onEvent?: (event: Event) => void):
       if (!frame.startsWith('data: ')) continue;
       const event = JSON.parse(frame.slice(6)) as Event;
       events.push(event);
-      onEvent?.(event);
+      onEvent?.(event, reader);
     }
   }
 
@@ -150,6 +158,12 @@ const toolCalls = () =>
   scrapeMock.mock.calls.length +
   mapMock.mock.calls.length +
   startAgentMock.mock.calls.length;
+
+/** Watch the model calls, which go to AIMock through the global fetch. */
+function watchModelCalls() {
+  const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  return () => fetchSpy.mock.calls.filter(([input]) => String(input instanceof Request ? input.url : input).startsWith(AIMOCK_URL)).length;
+}
 
 beforeAll(async () => {
   const health = await fetch(`${AIMOCK_URL}/health`).catch(() => undefined);
@@ -314,6 +328,44 @@ describe('POST /api/enrich', () => {
     expect(toolCalls()).toBe(0);
   });
 
+  it(
+    'cancels on a client disconnect: no more tool or model calls, and the session is gone',
+    { timeout: 60_000 },
+    async () => {
+      // The first search holds for three seconds, so the disconnect lands mid-call.
+      searchMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(searchFixture), 3_000)));
+      const modelCalls = watchModelCalls();
+
+      let sessionId = '';
+      let disconnected: Promise<void> | undefined;
+      let callsAtCancel = 0;
+      let modelCallsAtCancel = 0;
+
+      const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]), (event, reader) => {
+        if (event.type === 'session') sessionId = event.sessionId as string;
+        if (event.type === 'agent_progress' && String(event.message).startsWith('Searching the web') && !disconnected) {
+          callsAtCancel = toolCalls();
+          modelCallsAtCancel = modelCalls();
+          disconnected = reader.cancel();
+        }
+      });
+      await disconnected;
+
+      expect(disconnected).toBeDefined();
+      // The identify step reached the model before its search, so the watch sees model calls.
+      expect(modelCallsAtCancel).toBeGreaterThan(0);
+      expect(events.map((event) => event.type)).not.toContain('result');
+      // The session was stopped the way a DELETE stops it, so it is gone.
+      const response = await DELETE(new NextRequest(`http://localhost/api/enrich?sessionId=${sessionId}`, { method: 'DELETE' }));
+      expect(response.status).toBe(404);
+
+      // Nothing new is called after the disconnect, even once the held call settles.
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+      expect(toolCalls()).toBe(callsAtCancel);
+      expect(modelCalls()).toBe(modelCallsAtCancel);
+    }
+  );
+
   it('answers 404 to a DELETE for an unknown session', async () => {
     const response = await DELETE(new NextRequest('http://localhost/api/enrich?sessionId=missing', { method: 'DELETE' }));
 
@@ -433,6 +485,44 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
     expect(runs.recordRow).not.toHaveBeenCalled();
     expect(runs.finishRun).toHaveBeenCalledOnce();
     expect(runs.finishRun).toHaveBeenCalledWith('run_1', 'partial');
+  });
+
+  it('commits a session stopped by a client disconnect as `partial`, with the rows that finished', { timeout: 120_000 }, async () => {
+    runs.doltConfigured.mockReturnValue(true);
+    // One row at a time, so the first row finishes before the second starts.
+    const config = ENRICHMENT_CONFIG as { MASTRA_CONCURRENT_ROWS: number };
+    const concurrency = config.MASTRA_CONCURRENT_ROWS;
+    config.MASTRA_CONCURRENT_ROWS = 1;
+    // Searches answer until the first row is recorded, then hold.
+    searchMock.mockImplementation(() =>
+      runs.recordRow.mock.calls.length > 0
+        ? new Promise((resolve) => setTimeout(() => resolve(searchFixture), 10_000))
+        : Promise.resolve(searchFixture)
+    );
+
+    try {
+      let finished = false;
+      let disconnected: Promise<void> | undefined;
+      const events = await readEvents(
+        await post([{ email: 'hello@firecrawl.dev' }, { email: 'hello@firecrawl.dev' }]),
+        (event, reader) => {
+          if (event.type === 'result') finished = true;
+          if (finished && event.type === 'agent_progress' && String(event.message).startsWith('Searching the web') && !disconnected) {
+            disconnected = reader.cancel();
+          }
+        }
+      );
+      await disconnected;
+
+      expect(disconnected).toBeDefined();
+      expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
+      // The run is committed after the stopped row settles, with no client left to tell.
+      await vi.waitFor(() => expect(runs.finishRun).toHaveBeenCalledOnce(), { timeout: 20_000 });
+      expect(runs.finishRun).toHaveBeenCalledWith('run_1', 'partial');
+      expect(runs.recordRow).toHaveBeenCalledOnce();
+    } finally {
+      config.MASTRA_CONCURRENT_ROWS = concurrency;
+    }
   });
 
   it('commits a session that fails part-way as `failed`', { timeout: 30_000 }, async () => {

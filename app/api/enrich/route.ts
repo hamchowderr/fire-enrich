@@ -17,7 +17,8 @@ export const runtime = 'nodejs';
 
 /**
  * A running session: the controller that stops new rows from starting, and
- * the Mastra runs still in flight, so a DELETE can cancel them as well.
+ * the Mastra runs still in flight, so a DELETE or a client disconnect can
+ * cancel them as well.
  */
 interface ActiveSession {
   controller: AbortController;
@@ -29,6 +30,22 @@ const CANCEL_SETTLE_MS = 15_000;
 
 // Store active sessions in memory (in production, use Redis or similar)
 const activeSessions = new Map<string, ActiveSession>();
+
+/**
+ * Stop a session: no new rows start, and the Mastra runs already going are
+ * cancelled. `Run.cancel()` aborts the run's signal, which the research agents
+ * and the Firecrawl tools observe, and marks the run canceled in storage.
+ * Shared by DELETE and a client disconnect. False when there is no such session.
+ */
+async function cancelSession(sessionId: string): Promise<boolean> {
+  const session = activeSessions.get(sessionId);
+  if (!session) return false;
+
+  session.controller.abort();
+  await Promise.allSettled([...session.runs].map((run) => run.cancel()));
+  activeSessions.delete(sessionId);
+  return true;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -96,11 +113,11 @@ export async function POST(request: NextRequest) {
 
     // Create a streaming response
     const encoder = new TextEncoder();
+    // Rows still in flight after a cancel can finish a moment later; once
+    // the stream is closed their writes are dropped instead of throwing.
+    let closed = false;
     const stream = new ReadableStream({
       async start(controller) {
-        // Rows still in flight after a cancel can finish a moment later; once
-        // the stream is closed their writes are dropped instead of throwing.
-        let closed = false;
         const send = (data: unknown) => {
           if (closed) return;
           try {
@@ -323,9 +340,19 @@ export async function POST(request: NextRequest) {
           });
         } finally {
           activeSessions.delete(sessionId);
-          closed = true;
-          controller.close();
+          // A disconnected client has already closed the stream.
+          if (!closed) {
+            closed = true;
+            controller.close();
+          }
         }
+      },
+      // The client went away (tab closed, fetch aborted) without a DELETE:
+      // stop the session the same way, so its rows stop spending credits.
+      async cancel() {
+        closed = true;
+        console.log(`[ENRICHMENT] Client disconnected; cancelling session ${sessionId}`);
+        await cancelSession(sessionId);
       },
     });
 
@@ -361,14 +388,7 @@ export async function DELETE(request: NextRequest) {
     );
   }
 
-  const session = activeSessions.get(sessionId);
-  if (session) {
-    // Stop new rows, then stop the Mastra runs already going: `Run.cancel()`
-    // aborts the run's signal, which the research agents and the Firecrawl
-    // tools observe, and marks the run canceled in storage.
-    session.controller.abort();
-    await Promise.allSettled([...session.runs].map((run) => run.cancel()));
-    activeSessions.delete(sessionId);
+  if (await cancelSession(sessionId)) {
     return NextResponse.json({ success: true });
   }
 
