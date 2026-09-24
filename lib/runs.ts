@@ -60,7 +60,10 @@
  *   (`SELECT * FROM enrichment_runs AS OF 'run/<id>'`, or `dolt_branches`),
  *   not on `main`, until it finishes.
  * - A process that dies mid-run leaves `run/<id>` behind with its rows
- *   uncommitted in the branch's working set. Nothing sweeps those yet.
+ *   uncommitted in the branch's working set, until {@link sweepAbandonedRuns}
+ *   (`npm run db:sweep-runs`) finds the branch older than its threshold and
+ *   merges what finished as a `partial` run. Nothing runs the sweeper on a
+ *   schedule yet.
  * - One extra connection per run in flight, outside the pool.
  * - Dolt refuses a merge into `main` while `main`'s working set holds
  *   uncommitted changes to a table the merge touches ("local changes would be
@@ -355,15 +358,25 @@ export async function abandonRun(runId: string): Promise<void> {
   await run.connection.end().catch(() => undefined);
 }
 
-/** Commit message for a run: a summary line, then trailers `dolt_log` can be filtered on. */
-function commitMessage(run: ActiveRun, status: FinishStatus): string {
+/** What a run's commit message says about it. */
+type RunTally = Pick<ActiveRun, 'id' | 'planId' | 'listRef' | 'rows' | 'enrichments'>;
+
+/** A run's branch, as the merge into `main` needs it. */
+type RunBranch = Pick<ActiveRun, 'id' | 'branch'>;
+
+/**
+ * Commit message for a run: a summary line, then trailers `dolt_log` can be
+ * filtered on. `swept` names the reason a sweep, not the run, finished it.
+ */
+function commitMessage(run: RunTally, status: FinishStatus, swept?: string): string {
   return [
-    `Enrichment run ${run.id}: ${status}, ${run.rows} row${run.rows === 1 ? '' : 's'}, ${run.enrichments} enrichment${run.enrichments === 1 ? '' : 's'}`,
+    `Enrichment run ${run.id}: ${status}, ${run.rows} row${run.rows === 1 ? '' : 's'}, ${run.enrichments} enrichment${run.enrichments === 1 ? '' : 's'}${swept ? ' (swept)' : ''}`,
     '',
     `Run-Id: ${run.id}`,
     `Plan-Id: ${run.planId ?? 'none'}`,
     `List-Ref: ${run.listRef.replace(/\s+/g, ' ')}`,
     `Status: ${status}`,
+    ...(swept ? [`Swept: ${swept}`] : []),
   ].join('\n');
 }
 
@@ -400,7 +413,7 @@ function isAlreadyMerged(result: unknown): boolean {
  * its acknowledgement was lost. The run is recorded if `main`'s run row
  * carries this run's commit; anything else is an error, not a success.
  */
-async function confirmMerged(connection: mysql.Connection, run: ActiveRun, runCommit: string): Promise<null> {
+async function confirmMerged(connection: mysql.Connection, run: RunBranch, runCommit: string): Promise<null> {
   const [rows] = await connection.query('SELECT commit_hash FROM enrichment_runs WHERE id = ?', [run.id]);
   const onMain = (rows as Array<{ commit_hash?: unknown }>)[0]?.commit_hash;
   if (onMain === runCommit) return null;
@@ -412,7 +425,7 @@ async function confirmMerged(connection: mysql.Connection, run: ActiveRun, runCo
  * merge commit. Returns the merge commit's hash, or null when the branch was
  * already merged by an earlier attempt.
  */
-async function mergeIntoMain(run: ActiveRun, runCommit: string, message: string, author: string): Promise<string | null> {
+async function mergeIntoMain(run: RunBranch, runCommit: string, message: string, author: string): Promise<string | null> {
   const connection = await connect();
   try {
     await connection.query('START TRANSACTION');
@@ -449,6 +462,23 @@ async function mergeIntoMain(run: ActiveRun, runCommit: string, message: string,
 }
 
 /**
+ * {@link mergeIntoMain} under this process's merge lock, retried on a lost
+ * race with another client's write ({@link MERGE_ATTEMPTS}).
+ */
+function mergeWithRetry(run: RunBranch, runCommit: string, message: string, author: string): Promise<void> {
+  return withMainLock(async () => {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await mergeIntoMain(run, runCommit, message, author);
+        return;
+      } catch (error) {
+        if (attempt >= MERGE_ATTEMPTS || !isRetryableMergeError(error)) throw error;
+      }
+    }
+  });
+}
+
+/**
  * Finish a run: wait for its writes, set its terminal status and
  * `finished_at`, commit the branch, and merge it into `main` with the commit's
  * hash in `commit_hash`. Resolves to the run's commit hash.
@@ -477,17 +507,7 @@ export async function finishRun(runId: string, status: FinishStatus): Promise<st
 
   if (!runCommit) throw new Error(`Dolt returned no hash for run ${run.id}'s commit`);
 
-  const hash = runCommit;
-  await withMainLock(async () => {
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        await mergeIntoMain(run, hash, message, author);
-        return;
-      } catch (error) {
-        if (attempt >= MERGE_ATTEMPTS || !isRetryableMergeError(error)) throw error;
-      }
-    }
-  });
+  await mergeWithRetry(run, runCommit, message, author);
 
   // Merged, so the branch only duplicates what `main` now holds. A failure
   // here leaves a stale pointer, not lost data.
@@ -495,7 +515,177 @@ export async function finishRun(runId: string, status: FinishStatus): Promise<st
     console.warn(`[RUNS] Could not delete ${run.branch}: ${error instanceof Error ? error.message : error}`);
   });
 
-  return hash;
+  return runCommit;
+}
+
+/** How long a run branch sits untouched before the sweeper takes it as abandoned. */
+export const DEFAULT_SWEEP_HOURS = 6;
+
+/** What the sweeper did, or in a dry run would do, with one abandoned branch. */
+export interface SweptBranch {
+  branch: string;
+  runId: string;
+  /**
+   * `merged`: the branch's rows were committed and merged into `main` as a
+   * `partial` run. `deleted`: `main` already held the run, so only the branch
+   * went.
+   */
+  action: 'merged' | 'deleted';
+  /**
+   * The run's status on `main` after the sweep: `partial` for a run that was
+   * still `running`, else the status `finishRun` committed before its merge
+   * failed. Null for `deleted`, whose row on `main` is left as it is.
+   */
+  status: FinishStatus | null;
+  /** Contacts with at least one enrichment on the branch. */
+  rows: number;
+  enrichments: number;
+  /** The run's own commit, as `commit_hash` on `main` records it. */
+  commitHash: string | null;
+}
+
+/** The run row as its branch's working set holds it, with its age. */
+interface BranchRunRow {
+  id: string;
+  plan_id: string | null;
+  list_ref: string;
+  status: string;
+  age_seconds: unknown;
+}
+
+/**
+ * Finish the runs that a dead process left on their branches.
+ *
+ * Every `run/<id>` branch whose run started more than `olderThanHours` ago is
+ * taken as abandoned; a run that is still going finishes long before that.
+ * For each one:
+ *
+ * - When `main` already holds the run with a `commit_hash`, the merge landed
+ *   and only the branch delete was lost, so the branch is deleted and nothing
+ *   else changes.
+ * - Otherwise the run is finished the way a cancel finishes it: a run row
+ *   still `running` becomes `partial` with `finished_at` set, the branch's
+ *   working set (every row that finished before the crash) is committed, and
+ *   the branch is merged into `main` through the same merge, lock and retry
+ *   as {@link finishRun}. A branch that {@link finishRun} committed but could
+ *   not merge is merged as it is. The branch is then deleted.
+ *
+ * A branch with no run row (a crash between `DOLT_BRANCH` and the insert, or
+ * a start still in progress) is left alone with a warning. A branch that fails
+ * is reported in `failed` and the sweep goes on with the next one.
+ *
+ * With `dryRun` nothing is written: the result lists what a sweep would do.
+ */
+export async function sweepAbandonedRuns({
+  olderThanHours = DEFAULT_SWEEP_HOURS,
+  dryRun = false,
+}: { olderThanHours?: number; dryRun?: boolean } = {}): Promise<{
+  swept: SweptBranch[];
+  failed: Array<{ branch: string; error: string }>;
+}> {
+  if (!(olderThanHours > 0)) throw new Error(`olderThanHours must be a positive number, not ${olderThanHours}`);
+  const thresholdSeconds = olderThanHours * 3600;
+  const swept: SweptBranch[] = [];
+  const failed: Array<{ branch: string; error: string }> = [];
+
+  const branches = await select<{ name: string }>(
+    "SELECT name FROM dolt_branches WHERE name LIKE 'run/%' ORDER BY name"
+  );
+
+  for (const { name: branch } of branches) {
+    try {
+      const outcome = await sweepBranch(branch, thresholdSeconds, olderThanHours, dryRun);
+      if (outcome) swept.push(outcome);
+    } catch (error) {
+      failed.push({ branch, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  return { swept, failed };
+}
+
+/** Sweep one branch; null when it is not abandoned. See {@link sweepAbandonedRuns}. */
+async function sweepBranch(
+  branch: string,
+  thresholdSeconds: number,
+  olderThanHours: number,
+  dryRun: boolean
+): Promise<SweptBranch | null> {
+  const runId = branch.slice('run/'.length);
+
+  const connection = await connect(branch);
+  let run: RunTally;
+  let status: FinishStatus;
+  let runCommit: string | null = null;
+  const author = commitAuthor();
+  const swept = `abandoned run branch older than ${olderThanHours}h`;
+  let message = '';
+
+  try {
+    const [found] = await connection.query(
+      `SELECT id, plan_id, list_ref, status,
+         TIMESTAMPDIFF(SECOND, started_at, CURRENT_TIMESTAMP) AS age_seconds
+       FROM enrichment_runs WHERE id = ?`,
+      [runId]
+    );
+    const row = (found as BranchRunRow[])[0];
+    if (!row) {
+      console.warn(`[RUNS] ${branch} has no run row; left in place`);
+      return null;
+    }
+    if (!(Number(row.age_seconds) > thresholdSeconds)) return null;
+
+    const [onMain] = await select<{ commit_hash: string | null }>(
+      'SELECT commit_hash FROM enrichment_runs WHERE id = ?',
+      [runId]
+    );
+    if (onMain?.commit_hash) {
+      if (!dryRun) await query("CALL DOLT_BRANCH('-D', ?)", [branch]);
+      return { branch, runId, action: 'deleted', status: null, rows: 0, enrichments: 0, commitHash: onMain.commit_hash };
+    }
+
+    const [counted] = await connection.query(
+      'SELECT COUNT(DISTINCT contact_email) AS contacts, COUNT(*) AS enrichments FROM enrichments WHERE run_id = ?',
+      [runId]
+    );
+    const counts = (counted as Array<{ contacts: unknown; enrichments: unknown }>)[0];
+    run = {
+      id: runId,
+      planId: row.plan_id,
+      listRef: row.list_ref,
+      rows: Number(counts?.contacts ?? 0),
+      enrichments: Number(counts?.enrichments ?? 0),
+    };
+    // A run `finishRun` committed but could not merge keeps its own status.
+    status = (row.status === 'running' ? 'partial' : row.status) as FinishStatus;
+    if (dryRun) return { branch, runId, action: 'merged', status, rows: run.rows, enrichments: run.enrichments, commitHash: null };
+
+    message = commitMessage(run, status, swept);
+    await connection.query(
+      "UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'",
+      [status, runId]
+    );
+    runCommit = await connection
+      .query("CALL DOLT_COMMIT('-Am', ?, '--author', ?)", [message, author])
+      .then(([result]) => readCommitHash(result), (error: unknown) => {
+        // Already committed by `finishRun`: the branch head is the run's commit.
+        if (isNothingToCommit(error)) return null;
+        throw error;
+      });
+    if (!runCommit) {
+      const [head] = await connection.query("SELECT DOLT_HASHOF('HEAD') AS hash");
+      runCommit = readCommitHash(head);
+    }
+  } finally {
+    await connection.end().catch(() => undefined);
+  }
+
+  if (!runCommit) throw new Error(`Dolt returned no hash for run ${runId}'s commit`);
+
+  await mergeWithRetry({ id: runId, branch }, runCommit, message, author);
+  await query("CALL DOLT_BRANCH('-D', ?)", [branch]);
+
+  return { branch, runId, action: 'merged', status, rows: run.rows, enrichments: run.enrichments, commitHash: runCommit };
 }
 
 /** A recorded run as `main`'s head holds it. */

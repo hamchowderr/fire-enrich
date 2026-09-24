@@ -71,6 +71,7 @@ npm run test:ai        # starts AIMock on :4010, runs vitest, stops it
 npm test               # vitest only; tests/routes/* need `npm run aimock` running
 npm run build          # next build
 npm run test:e2e       # Playwright smoke against the built app; CI runs it after the build with E2E_SKIP_BUILD=1
+npm run db:sweep-runs  # merge run/* branches older than 6h into main as partial runs; -- --older-than-hours N, -- --dry-run
 ```
 
 Tests never touch a real model, Firecrawl, or database: `tests/setup.ts` forces
