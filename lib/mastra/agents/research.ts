@@ -14,14 +14,14 @@
  * |           | `agent-browser`                                              |
  *
  * The browser agent is attached through the Agent `agents` option, which
- * `@mastra/core` 1.67 turns into a tool named `agent-<key>` for the model
+ * `@mastra/core` 1.70 turns into a tool named `agent-<key>` for the model
  * (`Agent.listAgentTools` in `dist/agent-*.js`). It is resolved per call, so a
  * search or agent group never sees it and never provisions a browser session.
  *
  * ## Memory
  *
  * The browser agent refuses to track its page without a memory thread and
- * resource (see `browser.ts`). On 1.67 a sub-agent is given memory only when
+ * resource (see `browser.ts`). On 1.70 a sub-agent is given memory only when
  * its parent call carries both a thread and a resource, so browser-strategy
  * calls pass `memory: { thread: runId, resource: sessionId }`. Those ids switch
  * the injection on; they are not the sub-agent's own. The delegated run gets
