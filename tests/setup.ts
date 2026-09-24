@@ -14,6 +14,15 @@ import { mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { vi } from 'vitest';
+
+// Tests call route handlers directly, outside a Next.js request scope, where
+// `after` throws. Record the tasks instead, so a test can inspect them.
+vi.mock('next/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/server')>()),
+  after: vi.fn(),
+}));
+
 process.env.USE_AIMOCK = 'true';
 process.env.AIMOCK_URL ??= 'http://127.0.0.1:4010';
 

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import type { EnrichmentRequest, RowEnrichmentResult } from '@/lib/types';
 import { loadSkipList, shouldSkipEmail, getSkipReason } from '@/lib/utils/skip-list';
 import { ENRICHMENT_CONFIG } from '@/lib/config/enrichment';
@@ -108,8 +108,31 @@ export async function POST(request: NextRequest) {
     const session: ActiveSession = { controller: abortController, runs: new Set() };
     activeSessions.set(sessionId, session);
 
+    // The client went away (tab closed, fetch aborted) without a DELETE: stop
+    // the session the same way, so its rows stop spending credits. Two signals
+    // report it, and either may come first or alone: the stream's cancel()
+    // (next dev, next start) and request.signal (Vercel, where the function has
+    // `supportsCancellation` in vercel.json). Acts once.
+    let disconnected = false;
+    const disconnect = async () => {
+      if (disconnected) return;
+      disconnected = true;
+      console.log(`[ENRICHMENT] Client disconnected; cancelling session ${sessionId}`);
+      await cancelSession(sessionId);
+    };
+
     // Load skip list
     const skipList = await loadSkipList();
+
+    const onRequestAbort = () => void disconnect();
+    if (request.signal.aborted) onRequestAbort();
+    else request.signal.addEventListener('abort', onRequestAbort, { once: true });
+
+    // Settles when the session ends. Vercel may reclaim a cancelled function
+    // at any time, so the session is kept alive with `after` until its rows
+    // settle and the run is committed.
+    const sessionEnded = Promise.withResolvers<void>();
+    after(sessionEnded.promise);
 
     // Create a streaming response
     const encoder = new TextEncoder();
@@ -340,19 +363,18 @@ export async function POST(request: NextRequest) {
           });
         } finally {
           activeSessions.delete(sessionId);
+          request.signal.removeEventListener('abort', onRequestAbort);
           // A disconnected client has already closed the stream.
           if (!closed) {
             closed = true;
             controller.close();
           }
+          sessionEnded.resolve();
         }
       },
-      // The client went away (tab closed, fetch aborted) without a DELETE:
-      // stop the session the same way, so its rows stop spending credits.
       async cancel() {
         closed = true;
-        console.log(`[ENRICHMENT] Client disconnected; cancelling session ${sessionId}`);
-        await cancelSession(sessionId);
+        await disconnect();
       },
     });
 
