@@ -13,7 +13,7 @@
  *
  * Requires AIMock on `AIMOCK_URL` (`npm run test:ai` starts it).
  */
-import { NextRequest } from 'next/server';
+import { NextRequest, after } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import agentFixture from '../fixtures/firecrawl/agent.json';
@@ -111,12 +111,13 @@ const FIELDS = PLAN.fields.map(({ name, displayName, description, type }) => ({
 
 type Event = { type: string; [key: string]: unknown };
 
-function post(rows: Array<Record<string, string>>): Promise<Response> {
+function post(rows: Array<Record<string, string>>, signal?: AbortSignal): Promise<Response> {
   return POST(
     new NextRequest('http://localhost/api/enrich', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ rows, fields: FIELDS, emailColumn: 'email' }),
+      signal,
     })
   );
 }
@@ -366,6 +367,85 @@ describe('POST /api/enrich', () => {
     }
   );
 
+  it(
+    'cancels when the request signal aborts (a disconnect on Vercel): no more tool or model calls, and the session is gone',
+    { timeout: 60_000 },
+    async () => {
+      // The first search holds for three seconds, so the abort lands mid-call.
+      searchMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(searchFixture), 3_000)));
+      const modelCalls = watchModelCalls();
+      const client = new AbortController();
+
+      let sessionId = '';
+      let callsAtAbort = 0;
+      let modelCallsAtAbort = 0;
+
+      // The stream is still read to its end: only the request signal reports the disconnect.
+      const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }], client.signal), (event) => {
+        if (event.type === 'session') sessionId = event.sessionId as string;
+        if (event.type === 'agent_progress' && String(event.message).startsWith('Searching the web') && !client.signal.aborted) {
+          callsAtAbort = toolCalls();
+          modelCallsAtAbort = modelCalls();
+          client.abort();
+        }
+      });
+
+      expect(client.signal.aborted).toBe(true);
+      expect(modelCallsAtAbort).toBeGreaterThan(0);
+      const types = events.map((event) => event.type);
+      expect(types).toContain('cancelled');
+      expect(types).not.toContain('result');
+      expect(types).not.toContain('complete');
+      expect(vi.mocked(console.log).mock.calls.filter(([line]) => String(line).includes('Client disconnected'))).toHaveLength(1);
+      // The session was stopped the way a DELETE stops it, so it is gone.
+      const response = await DELETE(new NextRequest(`http://localhost/api/enrich?sessionId=${sessionId}`, { method: 'DELETE' }));
+      expect(response.status).toBe(404);
+
+      // Nothing new is called after the abort, even once the held call settles.
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+      expect(toolCalls()).toBe(callsAtAbort);
+      expect(modelCalls()).toBe(modelCallsAtAbort);
+    }
+  );
+
+  it(
+    'acts once when both disconnect paths fire: stream cancel() and request signal abort',
+    { timeout: 60_000 },
+    async () => {
+      searchMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(searchFixture), 3_000)));
+      // Watch each row's run, so the test sees how often the session cancels it.
+      const workflow = mastra.getWorkflow('enrichRow');
+      const createRun = workflow.createRun.bind(workflow);
+      const runCancels: Array<ReturnType<typeof vi.fn>> = [];
+      vi.spyOn(workflow, 'createRun').mockImplementation(async (...args) => {
+        const run = await createRun(...args);
+        runCancels.push(vi.spyOn(run, 'cancel') as unknown as ReturnType<typeof vi.fn>);
+        return run;
+      });
+      const client = new AbortController();
+
+      let sessionId = '';
+      let disconnected: Promise<void> | undefined;
+      const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }], client.signal), (event, reader) => {
+        if (event.type === 'session') sessionId = event.sessionId as string;
+        if (event.type === 'agent_progress' && String(event.message).startsWith('Searching the web') && !disconnected) {
+          disconnected = reader.cancel();
+          client.abort();
+        }
+      });
+      await disconnected;
+
+      expect(client.signal.aborted).toBe(true);
+      expect(events.map((event) => event.type)).not.toContain('result');
+      expect(vi.mocked(console.log).mock.calls.filter(([line]) => String(line).includes('Client disconnected'))).toHaveLength(1);
+      // One row, one run, cancelled once.
+      expect(runCancels).toHaveLength(1);
+      expect(runCancels[0]).toHaveBeenCalledOnce();
+      const response = await DELETE(new NextRequest(`http://localhost/api/enrich?sessionId=${sessionId}`, { method: 'DELETE' }));
+      expect(response.status).toBe(404);
+    }
+  );
+
   it('answers 404 to a DELETE for an unknown session', async () => {
     const response = await DELETE(new NextRequest('http://localhost/api/enrich?sessionId=missing', { method: 'DELETE' }));
 
@@ -524,6 +604,58 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
       config.MASTRA_CONCURRENT_ROWS = concurrency;
     }
   });
+
+  it(
+    'commits a session stopped by a request signal abort as `partial`, and keeps the function alive until then',
+    { timeout: 120_000 },
+    async () => {
+      runs.doltConfigured.mockReturnValue(true);
+      // One row at a time, so the first row finishes before the second starts.
+      const config = ENRICHMENT_CONFIG as { MASTRA_CONCURRENT_ROWS: number };
+      const concurrency = config.MASTRA_CONCURRENT_ROWS;
+      config.MASTRA_CONCURRENT_ROWS = 1;
+      // Searches answer until the first row is recorded, then hold.
+      searchMock.mockImplementation(() =>
+        runs.recordRow.mock.calls.length > 0
+          ? new Promise((resolve) => setTimeout(() => resolve(searchFixture), 10_000))
+          : Promise.resolve(searchFixture)
+      );
+      const timeline: string[] = [];
+      runs.finishRun.mockImplementation(async () => {
+        timeline.push('finish');
+        return 'hash_1';
+      });
+
+      try {
+        const client = new AbortController();
+        let finished = false;
+        const response = await post([{ email: 'hello@firecrawl.dev' }, { email: 'hello@firecrawl.dev' }], client.signal);
+        // The session is handed to `after`, which keeps a cancelled Vercel function alive.
+        const kept = vi.mocked(after).mock.calls.at(-1)?.[0] as Promise<void>;
+        expect(kept).toBeInstanceOf(Promise);
+        void kept.then(() => timeline.push('session ended'));
+
+        const events = await readEvents(response, (event) => {
+          if (event.type === 'result') finished = true;
+          if (finished && event.type === 'agent_progress' && String(event.message).startsWith('Searching the web') && !client.signal.aborted) {
+            client.abort();
+          }
+        });
+        await kept;
+
+        expect(client.signal.aborted).toBe(true);
+        expect(events.filter((event) => event.type === 'result')).toHaveLength(1);
+        expect(events.map((event) => event.type)).toContain('cancelled');
+        expect(runs.finishRun).toHaveBeenCalledOnce();
+        expect(runs.finishRun).toHaveBeenCalledWith('run_1', 'partial');
+        expect(runs.recordRow).toHaveBeenCalledOnce();
+        // The kept-alive promise settles only once the run is committed.
+        expect(timeline).toEqual(['finish', 'session ended']);
+      } finally {
+        config.MASTRA_CONCURRENT_ROWS = concurrency;
+      }
+    }
+  );
 
   it('commits a session that fails part-way as `failed`', { timeout: 30_000 }, async () => {
     runs.doltConfigured.mockReturnValue(true);
