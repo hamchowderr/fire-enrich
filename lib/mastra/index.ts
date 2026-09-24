@@ -52,9 +52,40 @@ function projectRoot(): string {
   }
 }
 
+/**
+ * The one error a missing Turso configuration raises where the local file
+ * store cannot work, in place of a filesystem stack trace.
+ */
+const SERVERLESS_STORE_ERROR =
+  'TURSO_DATABASE_URL (and TURSO_AUTH_TOKEN) is required on serverless: the local ' +
+  'file store fallback at .mastra/fire-enrich.db needs a writable disk.';
+
+/**
+ * Whether a `mkdirSync` failure means the filesystem is not writable here, as
+ * opposed to a fault worth surfacing as it is.
+ */
+function isReadOnlyFsError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === 'EROFS' || code === 'EACCES';
+}
+
+/**
+ * The fallback for when `TURSO_DATABASE_URL` is unset.
+ *
+ * On Vercel, `/var/task` is read-only, so the guard throws before any
+ * filesystem call. Other read-only hosts are caught at the `mkdirSync` and
+ * reported with the same message.
+ */
 function localStoreUrl(): string {
+  if (process.env.VERCEL) throw new Error(SERVERLESS_STORE_ERROR);
+
   const file = path.join(projectRoot(), '.mastra', 'fire-enrich.db');
-  mkdirSync(path.dirname(file), { recursive: true });
+  try {
+    mkdirSync(path.dirname(file), { recursive: true });
+  } catch (err) {
+    if (isReadOnlyFsError(err)) throw new Error(SERVERLESS_STORE_ERROR, { cause: err });
+    throw err;
+  }
 
   return `file:${file}`;
 }
