@@ -62,7 +62,7 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ```bash
 npm run check          # check:lockfile + typecheck + lint + lint:mastra + fallow:gate, in order; what CI runs
-npm run check:lockfile # fails if package-lock.json lacks an @next/swc-* binary next build would patch in
+npm run check:lockfile # fails if an @next/swc-* binary next declares is missing at the top level, at another version, or nested under next
 npm run typecheck      # tsc --noEmit (includes tests/)
 npm run lint           # next lint
 npm run lint:mastra    # mastra lint on lib/mastra (--strict: warnings fail)

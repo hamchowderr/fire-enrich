@@ -9,14 +9,15 @@
  * On every local run, Next (node_modules/next/dist/lib/patch-incorrect-lockfile.js)
  * reads its own `optionalDependencies`. If any `@next/swc-*` package in that
  * list has no entry at `node_modules/@next/swc-*` in package-lock.json, Next
- * downloads registry metadata and rewrites the whole lockfile. It skips this
- * when it detects CI, so CI never sees the problem. This check makes it fail
- * in CI instead.
+ * downloads registry metadata and rewrites the whole lockfile. When it detects
+ * CI it only logs a warning and does not write, so a CI build still passes
+ * with the lockfile unchanged. This check makes it fail in CI instead.
  *
  * Each locked `@next/swc-*` binary must:
  *
- *   1. have an entry at the top level (`node_modules/@next/swc-*`), because
- *      that is the only place Next's patcher looks, and
+ *   1. have an entry at the top level (`node_modules/@next/swc-*`). Next's
+ *      patcher looks under the prefix of the lockfile key that ends in
+ *      `node_modules/next`, and in this repo that prefix is the top level, and
  *   2. have the exact version that the locked `next` declares, and
  *   3. not have a second copy nested under `node_modules/next/node_modules/`.
  *      A nested copy is the one `next` resolves to, so npm treats the top-level
@@ -60,6 +61,7 @@ export function lockfileProblems(lock) {
     if (!entry) {
       problems.push(`${name}@${version} is missing at node_modules/${name}.`);
     } else if (entry.version !== version) {
+      // Next pins its SWC optionalDependencies to exact versions, so string equality is enough.
       problems.push(`${name} is locked at ${entry.version}, but next@${next.version} requires ${version}.`);
     }
   }
