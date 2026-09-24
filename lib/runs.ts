@@ -61,7 +61,7 @@
  *   not on `main`, until it finishes.
  * - A process that dies mid-run leaves `run/<id>` behind with its rows
  *   uncommitted in the branch's working set, until {@link sweepAbandonedRuns}
- *   (`npm run db:sweep-runs`) finds the branch older than its threshold and
+ *   (`npm run db:sweep-runs`) finds the branch idle past its threshold and
  *   merges what finished as a `partial` run. Nothing runs the sweeper on a
  *   schedule yet.
  * - One extra connection per run in flight, outside the pool.
@@ -347,14 +347,32 @@ export function recordRow(
 }
 
 /**
- * Stop recording a run without committing it: close its connection and forget
- * it. The branch and whatever reached its working set are left for inspection.
+ * Stop recording a run without committing it, after one of its writes failed:
+ * mark its run row `failed` with `finished_at` on the branch, close its
+ * connection and forget it. The branch and whatever reached its working set
+ * are left for inspection; {@link sweepAbandonedRuns} later merges them into
+ * `main` as the `failed` run they are.
+ *
+ * The status write is best effort. When it fails too (the connection that
+ * failed the row write is often the one that is gone), the run row stays
+ * `running`, and the sweeper cannot tell the branch from a crashed process's:
+ * it merges it as `partial`.
  */
 export async function abandonRun(runId: string): Promise<void> {
   const run = activeRuns.get(runId);
   if (!run) return;
   activeRuns.delete(runId);
   await run.writes;
+  await run.connection
+    .query("UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'", [
+      'failed' satisfies FinishStatus,
+      run.id,
+    ])
+    .catch((error: unknown) => {
+      console.warn(
+        `[RUNS] Could not mark abandoned run ${run.id} failed; the sweeper will merge it as partial: ${error instanceof Error ? error.message : error}`
+      );
+    });
   await run.connection.end().catch(() => undefined);
 }
 
@@ -526,15 +544,16 @@ export interface SweptBranch {
   branch: string;
   runId: string;
   /**
-   * `merged`: the branch's rows were committed and merged into `main` as a
-   * `partial` run. `deleted`: `main` already held the run, so only the branch
+   * `merged`: the branch's rows were committed and merged into `main`.
+   * `deleted`: `main` already held the run, so only the branch
    * went.
    */
   action: 'merged' | 'deleted';
   /**
    * The run's status on `main` after the sweep: `partial` for a run that was
-   * still `running`, else the status `finishRun` committed before its merge
-   * failed. Null for `deleted`, whose row on `main` is left as it is.
+   * still `running`, else the status already on the branch (`failed` from
+   * {@link abandonRun}, or whatever `finishRun` committed before its merge
+   * failed). Null for `deleted`, whose row on `main` is left as it is.
    */
   status: FinishStatus | null;
   /** Contacts with at least one enrichment on the branch. */
@@ -544,21 +563,33 @@ export interface SweptBranch {
   commitHash: string | null;
 }
 
-/** The run row as its branch's working set holds it, with its age. */
+/**
+ * The run row as its branch's working set holds it, with the seconds since
+ * each write the sweeper can see (NULL for one that has not happened).
+ */
 interface BranchRunRow {
   id: string;
   plan_id: string | null;
   list_ref: string;
   status: string;
-  age_seconds: unknown;
+  since_start: unknown;
+  since_finish: unknown;
+  since_commit: unknown;
+}
+
+/** Seconds since the latest of the writes in `row`: the smallest of its ages. */
+function idleSeconds(row: BranchRunRow): number {
+  const ages = [row.since_start, row.since_finish, row.since_commit]
+    .map(numberOrNull)
+    .filter((age): age is number => age !== null);
+  return ages.length > 0 ? Math.min(...ages) : 0;
 }
 
 /**
  * Finish the runs that a dead process left on their branches.
  *
- * Every `run/<id>` branch whose run started more than `olderThanHours` ago is
- * taken as abandoned; a run that is still going finishes long before that.
- * For each one:
+ * Every `run/<id>` branch with no recorded write for more than
+ * `olderThanHours` is taken as abandoned. For each one:
  *
  * - When `main` already holds the run with a `commit_hash`, the merge landed
  *   and only the branch delete was lost, so the branch is deleted and nothing
@@ -567,8 +598,33 @@ interface BranchRunRow {
  *   still `running` becomes `partial` with `finished_at` set, the branch's
  *   working set (every row that finished before the crash) is committed, and
  *   the branch is merged into `main` through the same merge, lock and retry
- *   as {@link finishRun}. A branch that {@link finishRun} committed but could
- *   not merge is merged as it is. The branch is then deleted.
+ *   as {@link finishRun}. A run row with any other status keeps it: `failed`
+ *   from {@link abandonRun}, or the status of a branch {@link finishRun}
+ *   committed but could not merge. The branch is then deleted.
+ *
+ * ## Idle time
+ *
+ * Dolt keeps no timestamp for uncommitted working-set writes: `dolt_status`
+ * and the `dolt_workspace_*` tables carry none, and `dolt_branches` only has
+ * the branch head's `latest_commit_date`
+ * (https://www.dolthub.com/docs/sql-reference/version-control/dolt-system-tables).
+ * The last write the sweeper can see is therefore the latest of the run row's
+ * `started_at`, its `finished_at` (set by {@link abandonRun} and
+ * {@link finishRun}) and the branch's `latest_commit_date` (the run's commit,
+ * once {@link finishRun} made it; before that, the `main` commit the branch
+ * was cut from, which is older than `started_at`).
+ *
+ * Each is measured on its own clock. `started_at` and `finished_at` are
+ * `CURRENT_TIMESTAMP` values in the session time zone, while Dolt 2.1.8
+ * reports `latest_commit_date` in UTC, so the commit is compared with
+ * `UTC_TIMESTAMP()`. The ages are taken one by one rather than through
+ * `GREATEST`, which on these mixed datetime columns makes Dolt 2.1.8's
+ * `TIMESTAMPDIFF` return nonsense.
+ *
+ * Limit: {@link recordRow} leaves no timestamp, so a live run that started
+ * more than `olderThanHours` ago looks idle even while it is still writing
+ * rows, and would be swept mid-flight. Keep the threshold well above the
+ * longest run.
  *
  * A branch with no run row (a crash between `DOLT_BRANCH` and the insert, or
  * a start still in progress) is left alone with a warning. A branch that fails
@@ -618,22 +674,26 @@ async function sweepBranch(
   let status: FinishStatus;
   let runCommit: string | null = null;
   const author = commitAuthor();
-  const swept = `abandoned run branch older than ${olderThanHours}h`;
+  const swept = `abandoned run branch, no recorded write for ${olderThanHours}h`;
   let message = '';
 
   try {
     const [found] = await connection.query(
-      `SELECT id, plan_id, list_ref, status,
-         TIMESTAMPDIFF(SECOND, started_at, CURRENT_TIMESTAMP) AS age_seconds
-       FROM enrichment_runs WHERE id = ?`,
-      [runId]
+      `SELECT r.id, r.plan_id, r.list_ref, r.status,
+         TIMESTAMPDIFF(SECOND, r.started_at, CURRENT_TIMESTAMP) AS since_start,
+         TIMESTAMPDIFF(SECOND, r.finished_at, CURRENT_TIMESTAMP) AS since_finish,
+         TIMESTAMPDIFF(SECOND, b.latest_commit_date, UTC_TIMESTAMP()) AS since_commit
+       FROM enrichment_runs r
+       LEFT JOIN dolt_branches b ON b.name = ?
+       WHERE r.id = ?`,
+      [branch, runId]
     );
     const row = (found as BranchRunRow[])[0];
     if (!row) {
       console.warn(`[RUNS] ${branch} has no run row; left in place`);
       return null;
     }
-    if (!(Number(row.age_seconds) > thresholdSeconds)) return null;
+    if (!(idleSeconds(row) > thresholdSeconds)) return null;
 
     const [onMain] = await select<{ commit_hash: string | null }>(
       'SELECT commit_hash FROM enrichment_runs WHERE id = ?',
@@ -716,8 +776,11 @@ export interface RunChange {
 
 /** A run id that matches no run on `main`. */
 export class RunNotFoundError extends Error {
-  constructor(readonly runId: string) {
+  readonly runId: string;
+
+  constructor(runId: string) {
     super(`No run with id ${runId}`);
+    this.runId = runId;
     this.name = 'RunNotFoundError';
   }
 }
@@ -728,8 +791,11 @@ export class RunNotFoundError extends Error {
  * only happens after a hand edit of the row; kept as a defensive branch.
  */
 export class RunNotCommittedError extends Error {
-  constructor(readonly runId: string) {
+  readonly runId: string;
+
+  constructor(runId: string) {
     super(`Run ${runId} has no commit to read`);
+    this.runId = runId;
     this.name = 'RunNotCommittedError';
   }
 }

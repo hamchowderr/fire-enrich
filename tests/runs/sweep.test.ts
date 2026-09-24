@@ -5,7 +5,7 @@ import { configureDolt, installFakeDolt, isolateDoltEnv, type Statement } from '
 /**
  * `sweepAbandonedRuns` over the fake Dolt. A branch is set up the way a dead
  * process leaves it: listed in `dolt_branches`, with a run row on the branch
- * (its age as `TIMESTAMPDIFF` answers it) and, unless the merge landed, no
+ * (its idle time as `TIMESTAMPDIFF` answers it) and, unless the merge landed, no
  * row on `main`. What is asserted is the SQL the sweep sends, and where.
  */
 const { createPool, createConnection } = vi.hoisted(() => ({ createPool: vi.fn(), createConnection: vi.fn() }));
@@ -21,7 +21,12 @@ const WRITES = /UPDATE|INSERT|DELETE|DOLT_COMMIT|DOLT_MERGE|DOLT_BRANCH/;
 
 interface Branch {
   id: string;
-  ageSeconds: number;
+  /** Seconds since the run started, as the sweep's query answers it. */
+  sinceStart: number;
+  /** Seconds since `finished_at`; NULL (never set) when absent. */
+  sinceFinish?: number;
+  /** Seconds since the branch head's commit; NULL when absent. */
+  sinceCommit?: number;
   status?: string;
   /** `commit_hash` of the run's row on `main`; no row on `main` when absent. */
   onMain?: string | null;
@@ -47,7 +52,9 @@ function setUp(branches: Branch[]) {
         plan_id: 'plan_1',
         list_ref: 'contacts.csv',
         status: branch.status ?? 'running',
-        age_seconds: String(branch.ageSeconds),
+        since_start: String(branch.sinceStart),
+        since_finish: branch.sinceFinish === undefined ? null : String(branch.sinceFinish),
+        since_commit: branch.sinceCommit === undefined ? null : String(branch.sinceCommit),
       },
     ];
   });
@@ -80,7 +87,7 @@ afterEach(() => {
 
 describe('sweepAbandonedRuns', () => {
   it('commits an abandoned branch and merges it into main as a partial run, then deletes it', async () => {
-    setUp([{ id: 'dead1', ageSeconds: 7 * HOUR, contacts: 2, enrichments: 5 }]);
+    setUp([{ id: 'dead1', sinceStart: 7 * HOUR, contacts: 2, enrichments: 5 }]);
     const { sweepAbandonedRuns } = await loadRuns();
 
     const result = await sweepAbandonedRuns();
@@ -103,7 +110,7 @@ describe('sweepAbandonedRuns', () => {
       'Plan-Id: plan_1',
       'List-Ref: contacts.csv',
       'Status: partial',
-      'Swept: abandoned run branch older than 6h',
+      'Swept: abandoned run branch, no recorded write for 6h',
     ]);
     const runCommit = fake.hashes[0];
 
@@ -135,9 +142,55 @@ describe('sweepAbandonedRuns', () => {
     for (const connection of fake.connections) expect(connection.end).toHaveBeenCalled();
   });
 
+  it('reads each write signal on its own clock: run times in the session zone, the commit in UTC', async () => {
+    setUp([{ id: 'live1', sinceStart: HOUR }]);
+    const { sweepAbandonedRuns } = await loadRuns();
+
+    await sweepAbandonedRuns();
+
+    const [idle] = fake.find(/TIMESTAMPDIFF/, branchDb('live1'));
+    const sql = idle.sql.replace(/\s+/g, ' ');
+    expect(sql).toContain('TIMESTAMPDIFF(SECOND, r.started_at, CURRENT_TIMESTAMP) AS since_start');
+    expect(sql).toContain('TIMESTAMPDIFF(SECOND, r.finished_at, CURRENT_TIMESTAMP) AS since_finish');
+    expect(sql).toContain('TIMESTAMPDIFF(SECOND, b.latest_commit_date, UTC_TIMESTAMP()) AS since_commit');
+    expect(sql).toContain('LEFT JOIN dolt_branches b ON b.name = ?');
+    expect(idle.params).toEqual(['run/live1', 'live1']);
+  });
+
+  it('keeps a run that started long ago but wrote recently', async () => {
+    setUp([
+      // Given up on an hour ago: abandonRun set finished_at then.
+      { id: 'recentfinish', sinceStart: 30 * HOUR, status: 'failed', sinceFinish: HOUR },
+      // Committed by finishRun an hour ago, merge still pending.
+      { id: 'recentcommit', sinceStart: 30 * HOUR, status: 'completed', sinceFinish: 30 * HOUR, sinceCommit: HOUR },
+      // Every signal old: swept.
+      { id: 'stale', sinceStart: 30 * HOUR, sinceCommit: 31 * HOUR },
+    ]);
+    const { sweepAbandonedRuns } = await loadRuns();
+
+    const { swept } = await sweepAbandonedRuns();
+
+    expect(swept.map((branch) => branch.branch)).toEqual(['run/stale']);
+    expect(fake.find(WRITES, /recent/)).toEqual([]);
+  });
+
+  it('merges a run abandonRun gave up on as failed, not partial', async () => {
+    setUp([{ id: 'gaveup1', sinceStart: 7 * HOUR, status: 'failed', contacts: 1, enrichments: 2 }]);
+    const { sweepAbandonedRuns } = await loadRuns();
+
+    const { swept } = await sweepAbandonedRuns();
+
+    // The status update only touches a row still `running`; this one keeps `failed`.
+    expect(fake.find(/SET status/)[0].sql).toMatch(/AND status = 'running'$/);
+    expect(fake.find(/DOLT_COMMIT/, branchDb('gaveup1'))[0].params[0]).toMatch(
+      /^Enrichment run gaveup1: failed, 1 row, 2 enrichments \(swept\)\n[\s\S]*Status: failed/
+    );
+    expect(swept[0]).toMatchObject({ runId: 'gaveup1', action: 'merged', status: 'failed' });
+  });
+
   it('carries DOLT_COMMIT_AUTHOR on both the branch commit and the merge', async () => {
     process.env.DOLT_COMMIT_AUTHOR = 'Sweeper <sweeper@example.com>';
-    setUp([{ id: 'dead1', ageSeconds: 7 * HOUR }]);
+    setUp([{ id: 'dead1', sinceStart: 7 * HOUR }]);
     const { sweepAbandonedRuns } = await loadRuns();
 
     await sweepAbandonedRuns();
@@ -149,7 +202,7 @@ describe('sweepAbandonedRuns', () => {
   });
 
   it('only deletes the branch of a run main already holds, leaving main unchanged', async () => {
-    setUp([{ id: 'merged1', ageSeconds: 30 * HOUR, status: 'completed', onMain: 'abc123' }]);
+    setUp([{ id: 'merged1', sinceStart: 30 * HOUR, status: 'completed', onMain: 'abc123' }]);
     const { sweepAbandonedRuns } = await loadRuns();
 
     const result = await sweepAbandonedRuns();
@@ -171,7 +224,7 @@ describe('sweepAbandonedRuns', () => {
   });
 
   it('leaves a branch younger than the threshold alone', async () => {
-    setUp([{ id: 'live1', ageSeconds: 5 * HOUR }]);
+    setUp([{ id: 'live1', sinceStart: 5 * HOUR }]);
     const { sweepAbandonedRuns } = await loadRuns();
 
     expect(await sweepAbandonedRuns()).toEqual({ swept: [], failed: [] });
@@ -181,21 +234,21 @@ describe('sweepAbandonedRuns', () => {
   });
 
   it('takes the threshold from olderThanHours', async () => {
-    setUp([{ id: 'run5h', ageSeconds: 5 * HOUR }]);
+    setUp([{ id: 'run5h', sinceStart: 5 * HOUR }]);
     const { sweepAbandonedRuns } = await loadRuns();
 
     const { swept } = await sweepAbandonedRuns({ olderThanHours: 4 });
 
     expect(swept.map((branch) => branch.branch)).toEqual(['run/run5h']);
-    expect(fake.find(/DOLT_COMMIT/, branchDb('run5h'))[0].params[0]).toMatch(/Swept: abandoned run branch older than 4h$/);
+    expect(fake.find(/DOLT_COMMIT/, branchDb('run5h'))[0].params[0]).toMatch(/Swept: abandoned run branch, no recorded write for 4h$/);
     await expect(sweepAbandonedRuns({ olderThanHours: 0 })).rejects.toThrow(/positive number/);
   });
 
   it('writes nothing on a dry run, and reports what a sweep would do', async () => {
     setUp([
-      { id: 'dead1', ageSeconds: 7 * HOUR, contacts: 1, enrichments: 3 },
-      { id: 'merged1', ageSeconds: 7 * HOUR, onMain: 'abc123' },
-      { id: 'live1', ageSeconds: HOUR },
+      { id: 'dead1', sinceStart: 7 * HOUR, contacts: 1, enrichments: 3 },
+      { id: 'merged1', sinceStart: 7 * HOUR, onMain: 'abc123' },
+      { id: 'live1', sinceStart: HOUR },
     ]);
     const { sweepAbandonedRuns } = await loadRuns();
 
@@ -219,7 +272,7 @@ describe('sweepAbandonedRuns', () => {
   });
 
   it('merges a branch finishRun committed but could not merge, keeping its status', async () => {
-    setUp([{ id: 'unmerged1', ageSeconds: 7 * HOUR, status: 'completed' }]);
+    setUp([{ id: 'unmerged1', sinceStart: 7 * HOUR, status: 'completed' }]);
     fake.respond(/DOLT_COMMIT/, ({ on }: Statement) => {
       if (on === branchDb('unmerged1')) throw new Error('nothing to commit');
       return [[{ hash: 'mergecommit' }]];
@@ -238,8 +291,8 @@ describe('sweepAbandonedRuns', () => {
 
   it('reports a branch that fails and goes on with the next', async () => {
     setUp([
-      { id: 'bad1', ageSeconds: 7 * HOUR },
-      { id: 'dead2', ageSeconds: 7 * HOUR },
+      { id: 'bad1', sinceStart: 7 * HOUR },
+      { id: 'dead2', sinceStart: 7 * HOUR },
     ]);
     fake.respond(/DOLT_MERGE/, ({ params }: Statement) => {
       if (params[0] === 'run/bad1') return [[{ hash: '', fast_forward: 0, conflicts: 1 }]];
@@ -256,11 +309,48 @@ describe('sweepAbandonedRuns', () => {
   });
 
   it('leaves a branch with no run row in place', async () => {
-    setUp([{ id: 'empty1', ageSeconds: 0, noRow: true }]);
+    setUp([{ id: 'empty1', sinceStart: 0, noRow: true }]);
     const { sweepAbandonedRuns } = await loadRuns();
 
     expect(await sweepAbandonedRuns()).toEqual({ swept: [], failed: [] });
     expect(fake.find(WRITES)).toEqual([]);
     expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/run\/empty1 has no run row/));
+  });
+});
+
+describe('abandonRun', () => {
+  it('marks the run failed with finished_at on its branch before closing it', async () => {
+    const { abandonRun, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+
+    await abandonRun(runId);
+
+    expect(fake.find(/SET status/)).toEqual([
+      {
+        on: branchDb(runId),
+        sql: "UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'",
+        params: ['failed', runId],
+      },
+    ]);
+    // Nothing is committed or merged: the branch waits for the sweeper.
+    expect(fake.find(/DOLT_COMMIT|DOLT_MERGE/)).toEqual([]);
+    expect(fake.connections.find((connection) => connection.database === branchDb(runId))!.end).toHaveBeenCalled();
+  });
+
+  it('still closes the run when the status write fails, leaving it running for the sweeper to merge as partial', async () => {
+    const { abandonRun, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    fake.respond(/SET status/, () => {
+      throw new Error('Connection lost: The server closed the connection.');
+    });
+
+    await expect(abandonRun(runId)).resolves.toBeUndefined();
+
+    expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${runId} failed; the sweeper will merge it as partial`)));
+    expect(fake.connections.find((connection) => connection.database === branchDb(runId))!.end).toHaveBeenCalled();
+    // Forgotten either way: a second call has nothing to do.
+    fake.log.length = 0;
+    await abandonRun(runId);
+    expect(fake.log).toEqual([]);
   });
 });

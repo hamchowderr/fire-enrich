@@ -13,7 +13,7 @@
     "lint:mastra": "mastra lint --dir lib/mastra --strict",
     "typecheck": "tsc --noEmit",
     "db:migrate": "node scripts/db-migrate.mjs",
-    "db:sweep-runs": "node --experimental-transform-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sweep-runs.mjs",
+    "db:sweep-runs": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sweep-runs.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
