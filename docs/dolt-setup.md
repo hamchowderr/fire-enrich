@@ -221,14 +221,22 @@ certificate's subject alternative name.
   password.
 - If `DOLT_HOST` is an IP address, `mysql2` cannot check it. The app checks
   the address itself, after the connection opens and before it sends the
-  first statement. The login has then already happened. Use a DNS name if the
-  check must happen before the login.
+  first statement. By then the login is complete, and the password may
+  already be sent: a server can ask for `sha256_password` or
+  `caching_sha2_password` full authentication, and `mysql2` then sends the
+  plaintext password inside TLS. The plugin of the Dolt user does not
+  prevent this. For an IP host, only the pinned CA protects the password.
+
+Use a DNS name for `DOLT_HOST` where possible, so that the name is checked
+during the handshake, before any credentials are sent.
 
 `scripts/db-migrate.mjs` uses the same checks (`lib/dolt-tls.mjs`).
 
-Set `DOLT_TLS_CA_B64` to this server's own certificate only, not to a shared
-or organisation CA. A CA that signs other certificates lets each of those
-servers pass the certificate-chain check.
+**Never set `DOLT_TLS_CA_B64` to a shared, organisation or public CA.** Set
+it to this server's own self-signed certificate (step 2), or to a private CA
+that signs only this server's certificate. Every certificate that the CA
+signs passes the chain check, and with an IP host, any server with such a
+certificate receives the password before the address check runs.
 
 ### 6. Set the Vercel environment variables
 
