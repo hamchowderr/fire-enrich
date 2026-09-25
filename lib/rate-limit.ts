@@ -3,29 +3,44 @@ import { Redis } from "@upstash/redis";
 import { NextRequest } from "next/server";
 
 /**
- * Rate limiting is optional. It is on only when both UPSTASH_REDIS_REST_URL and
- * UPSTASH_REDIS_REST_TOKEN are set, in every environment; otherwise requests
- * are never limited and one info line says so.
+ * Rate limiting is optional. It is on only when one complete pair of Upstash
+ * REST credentials is set, in every environment: UPSTASH_REDIS_REST_URL and
+ * UPSTASH_REDIS_REST_TOKEN, or KV_REST_API_URL and KV_REST_API_TOKEN (the names
+ * Vercel's Upstash integration injects). A half pair, or one variable from each,
+ * does not count. Otherwise requests are never limited and one info line says so.
+ *
+ * The pair is resolved here rather than by `Redis.fromEnv()`, which picks the
+ * URL and the token independently and could combine one pair's URL with the
+ * other pair's token.
  */
-const upstashConfigured = () =>
-  Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+const upstashCredentials = (): { url: string; token: string } | null => {
+  const pairs = [
+    [process.env.UPSTASH_REDIS_REST_URL, process.env.UPSTASH_REDIS_REST_TOKEN],
+    [process.env.KV_REST_API_URL, process.env.KV_REST_API_TOKEN],
+  ];
+  for (const [url, token] of pairs) {
+    if (url && token) return { url, token };
+  }
+  return null;
+};
 
 let loggedDisabled = false;
 
 // Create a new ratelimiter that allows 50 requests per day per IP per endpoint
 const getRateLimiter = (endpoint: string) => {
-  if (!upstashConfigured()) {
+  const credentials = upstashCredentials();
+  if (!credentials) {
     if (!loggedDisabled) {
       loggedDisabled = true;
       console.info(
-        "[rate-limit] UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are not both set; rate limiting is off.",
+        "[rate-limit] No complete Upstash credentials (UPSTASH_REDIS_REST_URL/TOKEN or KV_REST_API_URL/TOKEN); rate limiting is off.",
       );
     }
     return null;
   }
 
   return new Ratelimit({
-    redis: Redis.fromEnv(),
+    redis: new Redis(credentials),
     limiter: Ratelimit.fixedWindow(50, "1 d"),
     analytics: true,
     prefix: `ratelimit:${endpoint}`,
