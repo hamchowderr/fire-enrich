@@ -18,8 +18,10 @@
  * per invocation. "Did anything change?" is answered by `dolt_status`, which is
  * Dolt's own view of the working set, rather than by guessing from the DDL.
  *
- * Plain `.mjs` with no dependency on the app's TypeScript: this runs before
- * anything is built, and against a database the app has not connected to yet.
+ * Plain `.mjs` with no dependency on the app's TypeScript: it runs by hand, and
+ * on Vercel from `scripts/vercel-build.mjs` after `next build` and before the
+ * deployment receives traffic, possibly against a database the app has not
+ * connected to yet.
  */
 import { readFile } from 'node:fs/promises';
 import process from 'node:process';

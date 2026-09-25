@@ -70,11 +70,38 @@ npm run fallow:gate    # dead-code gate: fails on any finding not in fallow.base
 npm run test:ai        # starts AIMock on :4010, runs vitest, stops it
 npm test               # vitest only; tests/routes/* need `npm run aimock` running
 npm run build          # next build
+npm run build:vercel   # Vercel's build: next build, then db:migrate on production (see below)
 npm run test:e2e       # Playwright smoke against the built app; CI runs it after the build with E2E_SKIP_BUILD=1
 npm run db:sweep-runs  # merge run/* branches idle over 6h into main (partial, or failed if given up); -- --older-than-hours N, -- --dry-run
+npm run db:migrate     # apply db/schema.sql to the DOLT_* database; a re-run is a no-op with no commit
 ```
 
-Tests never touch a real model, Firecrawl, or database: `tests/setup.ts` forces
+### Database migrations
+
+Vercel builds with `npm run build:vercel` (`buildCommand` in `vercel.json`, which runs `scripts/vercel-build.mjs`):
+`npm run build`, then `db:migrate` against that deployment's `DOLT_*` database.
+It migrates only when `VERCEL_ENV=production`, or on Preview when
+`DOLT_PREVIEW_MIGRATE=1` is set there. Set that flag only when Preview's `DOLT_*`
+point at a database no production deploy uses. A failed migration fails the
+deployment. Local `npm run build` is plain `next build` and needs no database.
+
+The migration runs while the previous deployment still serves traffic, and an
+instant rollback puts old code on the new schema. So every change to
+`db/schema.sql` must be additive and backwards-compatible: add tables, nullable
+columns, columns with defaults, and non-unique indexes. A UNIQUE constraint or
+index is not additive-safe: it fails on existing duplicates and rejects writes
+that old code still makes. Never drop or rename a column or
+table, or tighten a constraint, in the same release as the code that stops
+using it. Do that in a later release, after no live deployment reads it. Every
+statement must stay re-runnable (see the header of `db/schema.sql`).
+
+CI's `migrate` job applies the base branch's schema to a throwaway
+`dolthub/dolt-sql-server` container, then runs `tests/dolt/migrate.live.test.ts`.
+That test migrates, checks that a second run commits nothing, and compares the
+result with a fresh database. It is skipped unless `DOLT_TEST_HOST` and
+`DOLT_TEST_DATABASE` are set. Never point them at a database whose data matters.
+
+Apart from that opt-in migration test, tests never touch a real model, Firecrawl, or database: `tests/setup.ts` forces
 `USE_AIMOCK=true` (model calls answered from `fixtures/*.json`), stub API keys, and a
 temp SQLite file. Firecrawl is mocked at the SDK boundary from the recordings in
 `tests/fixtures/firecrawl/`. Every new engine feature ships tests on this harness.
