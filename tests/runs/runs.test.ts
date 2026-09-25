@@ -69,7 +69,7 @@ describe('startRun', () => {
     expect(fake.find(/INSERT INTO enrichment_runs/)).toEqual([
       {
         on: branchOf(runId),
-        sql: 'INSERT INTO enrichment_runs (id, plan_id, list_ref, status) VALUES (?, ?, ?, ?)',
+        sql: 'INSERT INTO enrichment_runs (id, plan_id, list_ref, status, last_activity_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
         params: [runId, 'plan_1', 'contacts.csv', 'running'],
       },
     ]);
@@ -131,14 +131,17 @@ describe('recordRow', () => {
 
     expect(written).toBe(2);
     const onBranch = fake.log.filter((statement) => statement.on === branchOf(runId)).slice(1);
+    // The run's heartbeat moves inside the row's own transaction.
     expect(onBranch.map((statement) => statement.sql)).toEqual([
       'START TRANSACTION',
+      'UPDATE enrichment_runs SET last_activity_at = CURRENT_TIMESTAMP WHERE id = ?',
       'INSERT INTO enrichments (id, run_id, contact_email, field, value, confidence, strategy) VALUES ?',
       'INSERT INTO evidence (id, enrichment_id, url, quote, confidence) VALUES ?',
       'COMMIT',
     ]);
+    expect(onBranch[1].params).toEqual([runId]);
 
-    const [enrichmentRows] = onBranch[1].params as [unknown[][]];
+    const [enrichmentRows] = onBranch[2].params as [unknown[][]];
     expect(enrichmentRows.map((row) => row.slice(1))).toEqual([
       [runId, 'hello@firecrawl.dev', 'headline', 'Power AI agents with clean web data', 0.912, 'browser'],
       [runId, 'hello@firecrawl.dev', 'tags', '["api","scraping"]', 0.5, 'search'],
@@ -147,7 +150,7 @@ describe('recordRow', () => {
     // Evidence rows point at their enrichment. The corroborating quote carries
     // its own confidence; a result without corroboration falls back to its
     // source contexts at the field's confidence.
-    const [evidenceRows] = onBranch[2].params as [unknown[][]];
+    const [evidenceRows] = onBranch[3].params as [unknown[][]];
     expect(evidenceRows.map((row) => row.slice(1))).toEqual([
       [enrichmentRows[0][0], 'https://www.firecrawl.dev/', 'Power AI agents with clean web data', 0.8],
       [enrichmentRows[1][0], 'https://www.firecrawl.dev/', 'Power AI agents with clean web data', 0.5],
@@ -160,6 +163,60 @@ describe('recordRow', () => {
 
     expect(await recordRow(runId, 'a@b.example', {})).toBe(0);
     expect(fake.find(/START TRANSACTION|INSERT INTO enrichments/, branchOf(runId))).toEqual([]);
+  });
+
+  it('only warns when an empty row cannot move the heartbeat, and tries again on the next one', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const { recordRow, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    let touches = 0;
+    fake.respond(/SET last_activity_at/, () => {
+      touches += 1;
+      if (touches === 1) throw new Error('Lock wait timeout exceeded');
+      return { affectedRows: 1 };
+    });
+
+    now.mockReturnValue(1_000_000 + 60_000);
+    await expect(recordRow(runId, 'a@b.example', {})).resolves.toBe(0);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/Could not move run .* heartbeat: Lock wait timeout exceeded/));
+
+    // Not marked as touched, so the next empty row tries again.
+    await expect(recordRow(runId, 'b@b.example', {})).resolves.toBe(0);
+    expect(touches).toBe(2);
+  });
+
+  it('still fails a real row write when its heartbeat cannot move', async () => {
+    const { recordRow, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    fake.respond(/SET last_activity_at/, () => {
+      throw new Error('Lock wait timeout exceeded');
+    });
+
+    await expect(recordRow(runId, 'a@b.example', { headline: enrichment() })).rejects.toThrow('Lock wait timeout exceeded');
+    expect(fake.find(/ROLLBACK/, branchOf(runId))).toHaveLength(1);
+  });
+
+  it('moves the heartbeat for an empty row only once the last one is a minute old', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const { recordRow, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    const touches = () => fake.find(/SET last_activity_at/, branchOf(runId));
+
+    now.mockReturnValue(1_000_000 + 59_000);
+    await recordRow(runId, 'a@b.example', {});
+    expect(touches()).toEqual([]);
+
+    now.mockReturnValue(1_000_000 + 60_000);
+    await recordRow(runId, 'b@b.example', {});
+    expect(touches()).toEqual([
+      { on: branchOf(runId), sql: 'UPDATE enrichment_runs SET last_activity_at = CURRENT_TIMESTAMP WHERE id = ?', params: [runId] },
+    ]);
+
+    // A row with enrichments moves it every time, and restarts the minute.
+    await recordRow(runId, 'c@b.example', { headline: enrichment() });
+    now.mockReturnValue(1_000_000 + 90_000);
+    await recordRow(runId, 'd@b.example', {});
+    expect(touches()).toHaveLength(2);
   });
 
   it('writes rows that finish together one after the other, never interleaved', async () => {
@@ -236,7 +293,7 @@ describe('finishRun', () => {
     expect(onBranch.slice(-2)).toEqual([
       {
         on: branchOf(runId),
-        sql: 'UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?',
+        sql: 'UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ?',
         params: ['completed', runId],
       },
       {
@@ -282,7 +339,7 @@ describe('finishRun', () => {
     const statements = fake.log.filter((statement) => statement.on === branchOf(runId)).map((statement) => statement.sql);
     // The row's write lands before the status update and the commit.
     expect(statements.indexOf('COMMIT')).toBeLessThan(
-      statements.indexOf('UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?')
+      statements.indexOf('UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ?')
     );
     expect(fake.find(/SET status/)[0].params).toEqual(['partial', runId]);
     expect(fake.find(/DOLT_COMMIT/, branchOf(runId))[0].params[0]).toMatch(/: partial, 1 row, 1 enrichment/);

@@ -6,7 +6,7 @@
 -- rolled back rather than hand-repaired.
 --
 -- Every statement is `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`
--- (or, for the one change to an existing table, a conditional block that reads
+-- (or, for a change to an existing table, a conditional block that reads
 -- `information_schema` first) so the whole file is safe to re-apply: the second
 -- run is a no-op and the migration script makes no Dolt commit. The script
 -- splits this file on `;` at end of line, so keep one statement per `;` and no
@@ -106,6 +106,12 @@ CREATE TABLE IF NOT EXISTS enrichment_runs (
   started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   -- NULL until the run stops, for any reason.
   finished_at DATETIME NULL,
+  -- The run's heartbeat: set at start, moved on by the rows it records and by
+  -- its finish, on the server's clock like the two columns above. The run
+  -- sweeper (`npm run db:sweep-runs`) takes a branch as abandoned only when
+  -- this has not moved for hours. NULL on runs recorded before the column
+  -- existed.
+  last_activity_at DATETIME NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'pending',
   -- The Dolt commit this run's enrichments landed in, so a result set can be
   -- read back exactly as it was written (`AS OF <hash>`). NULL until committed.
@@ -136,6 +142,16 @@ SET @fe_add_runs_fk = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE enrichment_runs ADD 
 PREPARE fe_add_runs_fk FROM @fe_add_runs_fk;
 EXECUTE fe_add_runs_fk;
 DEALLOCATE PREPARE fe_add_runs_fk;
+
+-- Migration for a database created before `last_activity_at`. Dolt (2.1) has
+-- no `ADD COLUMN IF NOT EXISTS`, so, as above, `information_schema` decides:
+-- the ALTER runs only while the column is missing, and existing runs get NULL,
+-- which the sweeper reads as "no heartbeat recorded". On a fresh or already
+-- migrated database it is `SELECT 1` and `dolt_status` stays clean.
+SET @fe_add_runs_activity = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE enrichment_runs ADD COLUMN last_activity_at DATETIME NULL AFTER finished_at', 'SELECT 1') FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'enrichment_runs' AND COLUMN_NAME = 'last_activity_at');
+PREPARE fe_add_runs_activity FROM @fe_add_runs_activity;
+EXECUTE fe_add_runs_activity;
+DEALLOCATE PREPARE fe_add_runs_activity;
 
 CREATE INDEX IF NOT EXISTS idx_enrichment_runs_plan_id ON enrichment_runs (plan_id);
 -- The operator view is "runs still going" and "runs newest first".
