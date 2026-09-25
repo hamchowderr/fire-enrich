@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EnrichmentResult } from '@/lib/types';
 
 import plannerFixtures from '../../fixtures/planner-plan.json';
-import { useTempAppDb } from '../app-db/temp-db';
+import { TEMP_APP_DB_TIMEOUT, useTempAppDb } from '../app-db/temp-db';
 import { configureDolt, installFakeDolt, isolateDoltEnv } from './fake-dolt';
 
 /**
@@ -517,7 +517,7 @@ describe('listRefFor', () => {
  * a real temporary libSQL file, then carried into the run row and the run's
  * commit on the fake Dolt, with no foreign-key fallback involved.
  */
-describe('a run of a plan saved in libSQL', () => {
+describe('a run of a plan saved in libSQL', { timeout: TEMP_APP_DB_TIMEOUT }, () => {
   let db: ReturnType<typeof useTempAppDb>;
 
   beforeEach(() => {

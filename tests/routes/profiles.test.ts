@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { holdWriteLock, useTempAppDb } from '../app-db/temp-db';
+import { holdWriteLock, TEMP_APP_DB_TIMEOUT, useTempAppDb } from '../app-db/temp-db';
 import { isolateDoltEnv } from '../runs/fake-dolt';
 
 /**
@@ -15,6 +15,8 @@ import { isolateDoltEnv } from '../runs/fake-dolt';
  * for an unknown id, 409 for a taken name or a merge that never got the write
  * lock — and what the database holds afterwards.
  */
+vi.setConfig({ testTimeout: TEMP_APP_DB_TIMEOUT });
+
 let db: ReturnType<typeof useTempAppDb>;
 let restoreDolt: () => void;
 

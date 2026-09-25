@@ -17,8 +17,8 @@ import { fallbackGoal, reconcilePlan, resolvePlan } from '@/lib/mastra/plan-fall
 import type { EnrichFieldDefinitionType, ResearchPlanType } from '@/lib/mastra/schemas';
 
 import fallbackFixtures from '../../fixtures/plan-fallback.json';
+import { AIMOCK_URL } from '../aimock';
 
-const AIMOCK_URL = process.env.AIMOCK_URL as string;
 const planner = mastra.getAgent('planner');
 const PLANNED: ResearchPlanType = JSON.parse(fallbackFixtures.fixtures[0].response.content);
 

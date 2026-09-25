@@ -17,8 +17,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { mastra } from '@/lib/mastra';
 
 import browserFixtures from '../../fixtures/browser-page.json';
-
-const AIMOCK_URL = process.env.AIMOCK_URL as string;
+import { AIMOCK_URL } from '../aimock';
 
 const [fixture] = browserFixtures.fixtures;
 const PROMPT = fixture.match.userMessage;
