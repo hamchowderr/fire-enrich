@@ -17,7 +17,7 @@
  * planning without one. A Dolt failure counts as a miss too: an outage should
  * cost one planner call, not the run.
  */
-import { doltConfigured } from '@/lib/dolt';
+import { isDoltConfigured } from '@/lib/dolt';
 import { findPlanByFieldSet, type SavedPlan } from '@/lib/plans';
 
 import type { ResearchPlanType } from './schemas';
@@ -144,7 +144,7 @@ function cachedPlanForFields(wanted: readonly string[], now: number): ResolvedPl
  * and so it is still found as a superset by a narrower request.
  */
 async function savedPlanForFields(wanted: readonly string[], now: number): Promise<ResolvedPlan | null> {
-  if (!doltConfigured()) return null;
+  if (!isDoltConfigured()) return null;
 
   let saved: SavedPlan | null;
   try {

@@ -92,6 +92,12 @@ It migrates only when `VERCEL_ENV=production`, or on Preview when
 point at a database no production deploy uses. A failed migration fails the
 deployment. Local `npm run build` is plain `next build` and needs no database.
 
+Dolt is optional (`doltConfigState()` in `lib/dolt-config.mjs`). With no `DOLT_*`
+connection variable set, the build logs one line, skips the migration and
+succeeds. With some set but `DOLT_HOST` or `DOLT_DATABASE` missing (or
+whitespace), the build fails before `next build` and names the missing variables;
+`db:migrate` and `db:sweep-runs` fail the same way.
+
 The migration runs while the previous deployment still serves traffic, and an
 instant rollback puts old code on the new schema. So every change to
 `db/schema.sql` must be additive and backwards-compatible: add tables, nullable

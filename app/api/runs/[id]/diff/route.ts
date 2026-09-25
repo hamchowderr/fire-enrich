@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 
-import { notFound, requireDolt } from '@/lib/api/profiles-http';
+import { notFound } from '@/lib/api/profiles-http';
+import { requireRunHistory } from '@/lib/api/runs-http';
 import {
   diffRuns,
   getRun,
@@ -23,10 +24,11 @@ type RouteContext = { params: Promise<{ id: string }> };
  *
  * 400 when `against` is `:id` itself or a run of a different list, 404 for an
  * unknown run on either side, 409 for a run row with no commit (only after a
- * hand edit), 503 when Dolt is not configured.
+ * hand edit), 501 "requires Dolt" ({@link requireRunHistory}) when Dolt,
+ * which is optional, is not configured.
  */
 export async function GET(request: NextRequest, context: RouteContext) {
-  const unconfigured = requireDolt('Run diffs');
+  const unconfigured = requireRunHistory('Run diffs');
   if (unconfigured) return unconfigured;
 
   const { id } = await context.params;

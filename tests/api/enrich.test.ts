@@ -9,7 +9,7 @@
  *
  * The Dolt run store (`lib/runs.ts`) is mocked too: its SQL is covered by
  * `tests/runs/`, and what is under test here is when the route calls it.
- * Recording is off (`doltConfigured()` false) unless a test turns it on.
+ * Recording is off (`isDoltConfigured()` false) unless a test turns it on.
  *
  * Requires AIMock on `AIMOCK_URL` (`npm run test:ai` starts it).
  */
@@ -30,7 +30,7 @@ const { searchMock, scrapeMock, mapMock, startAgentMock, getAgentStatusMock } = 
 }));
 
 const runs = vi.hoisted(() => ({
-  doltConfigured: vi.fn(),
+  isDoltConfigured: vi.fn(),
   startRun: vi.fn(),
   recordRow: vi.fn(),
   finishRun: vi.fn(),
@@ -39,7 +39,7 @@ const runs = vi.hoisted(() => ({
 
 vi.mock('@/lib/dolt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/dolt')>()),
-  doltConfigured: runs.doltConfigured,
+  isDoltConfigured: runs.isDoltConfigured,
 }));
 
 vi.mock('@/lib/runs', async (importOriginal) => ({
@@ -180,7 +180,7 @@ beforeEach(() => {
   startAgentMock.mockResolvedValue({ success: true, id: 'agent_fixture_job' });
   getAgentStatusMock.mockResolvedValue(agentFixture);
   putPlan(PLAN);
-  runs.doltConfigured.mockReturnValue(false);
+  runs.isDoltConfigured.mockReturnValue(false);
   runs.startRun.mockResolvedValue('run_1');
   runs.recordRow.mockResolvedValue(1);
   runs.finishRun.mockResolvedValue('hash_1');
@@ -474,7 +474,7 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
     'starts the run with the resolved planId, records each row as shown, and commits before `complete`',
     { timeout: 120_000 },
     async () => {
-      runs.doltConfigured.mockReturnValue(true);
+      runs.isDoltConfigured.mockReturnValue(true);
       // The plan resolves from a saved row, so it carries that row's id.
       putPlan(PLAN, { planId: 'plan_saved' });
 
@@ -515,7 +515,7 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   );
 
   it('streams `runId: null` on `complete` when the run commit fails', { timeout: 120_000 }, async () => {
-    runs.doltConfigured.mockReturnValue(true);
+    runs.isDoltConfigured.mockReturnValue(true);
     runs.finishRun.mockRejectedValue(new Error('merge conflicted'));
 
     const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]));
@@ -525,7 +525,7 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   });
 
   it('does not start a run before the plan resolves: a cancel during planning records nothing', { timeout: 30_000 }, async () => {
-    runs.doltConfigured.mockReturnValue(true);
+    runs.isDoltConfigured.mockReturnValue(true);
     const planner = mastra.getAgent('planner');
     vi.spyOn(planner, 'generate').mockImplementation(((_message: unknown, options?: { abortSignal?: AbortSignal }) =>
       new Promise<never>((_resolve, reject) => {
@@ -554,7 +554,7 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   });
 
   it('commits a cancelled session as `partial`, with a null planId for an unsaved plan', { timeout: 60_000 }, async () => {
-    runs.doltConfigured.mockReturnValue(true);
+    runs.isDoltConfigured.mockReturnValue(true);
     searchMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(searchFixture), 10_000)));
 
     const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]), cancelOnFirstSearch());
@@ -568,7 +568,7 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   });
 
   it('commits a session stopped by a client disconnect as `partial`, with the rows that finished', { timeout: 120_000 }, async () => {
-    runs.doltConfigured.mockReturnValue(true);
+    runs.isDoltConfigured.mockReturnValue(true);
     // One row at a time, so the first row finishes before the second starts.
     const config = ENRICHMENT_CONFIG as { MASTRA_CONCURRENT_ROWS: number };
     const concurrency = config.MASTRA_CONCURRENT_ROWS;
@@ -609,7 +609,7 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
     'commits a session stopped by a request signal abort as `partial`, and keeps the function alive until then',
     { timeout: 120_000 },
     async () => {
-      runs.doltConfigured.mockReturnValue(true);
+      runs.isDoltConfigured.mockReturnValue(true);
       // One row at a time, so the first row finishes before the second starts.
       const config = ENRICHMENT_CONFIG as { MASTRA_CONCURRENT_ROWS: number };
       const concurrency = config.MASTRA_CONCURRENT_ROWS;
@@ -658,7 +658,7 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
   );
 
   it('commits a session that fails part-way as `failed`', { timeout: 30_000 }, async () => {
-    runs.doltConfigured.mockReturnValue(true);
+    runs.isDoltConfigured.mockReturnValue(true);
 
     // A null row throws in the row loop, outside the per-row error handling,
     // which fails the session after its run has started.
@@ -677,8 +677,28 @@ describe('POST /api/enrich run recording (lib/runs mocked)', () => {
     expect(runs.finishRun).toHaveBeenCalledWith('run_1', 'failed');
   });
 
+  it('with no Dolt configured, enriches every row, records nothing, and warns nothing', { timeout: 120_000 }, async () => {
+    // The default: Dolt is optional and not configured.
+    runs.isDoltConfigured.mockReturnValue(false);
+    const warn = vi.mocked(console.warn);
+    warn.mockClear();
+
+    const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }, { email: 'hello@firecrawl.dev' }]));
+
+    const results = events.filter((event) => event.type === 'result') as unknown as Array<{ result: { status: string } }>;
+    expect(results.map(({ result }) => result.status)).toEqual(['completed', 'completed']);
+    // No "run not recorded" in the stream, and none in the log.
+    expect(warnings(events)).toEqual([]);
+    expect(JSON.stringify(events)).not.toMatch(/not recorded|storage unavailable/);
+    expect(warn.mock.calls.flat().join('\n')).not.toMatch(/\[RUNS\]|not recorded/);
+    expect(events.at(-1)).toEqual({ type: 'complete', runId: null });
+    expect(runs.startRun).not.toHaveBeenCalled();
+    expect(runs.recordRow).not.toHaveBeenCalled();
+    expect(runs.finishRun).not.toHaveBeenCalled();
+  });
+
   it('streams one generic warning when the run cannot be recorded, and enriches every row', { timeout: 120_000 }, async () => {
-    runs.doltConfigured.mockReturnValue(true);
+    runs.isDoltConfigured.mockReturnValue(true);
     runs.startRun.mockRejectedValue(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:3316'), { code: 'ECONNREFUSED' }));
 
     const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }, { email: 'hello@firecrawl.dev' }]));

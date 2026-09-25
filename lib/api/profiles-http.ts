@@ -16,7 +16,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import type { ZodError } from 'zod';
 
-import { doltConfigured } from '@/lib/dolt';
+import { isDoltConfigured } from '@/lib/dolt';
 import type { ProfileNameTakenError } from '@/lib/profiles';
 
 /**
@@ -28,7 +28,7 @@ import type { ProfileNameTakenError } from '@/lib/profiles';
  * actionable without reading the source.
  */
 export function requireDolt(feature = 'Profiles'): NextResponse | null {
-  if (doltConfigured()) return null;
+  if (isDoltConfigured()) return null;
 
   return NextResponse.json(
     {
