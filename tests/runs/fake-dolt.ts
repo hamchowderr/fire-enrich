@@ -79,16 +79,25 @@ export function installFakeDolt(createPool: ReturnType<typeof vi.fn>, createConn
     return [[], []];
   };
 
+  // `connection` stands in for mysql2's core connection, which the client
+  // reads for its TLS host check; with no `ssl` in its config there is none.
   createPool.mockImplementation(() => ({
-    query: vi.fn((sql: string, params?: unknown[]) => run('pool', sql, params)),
+    getConnection: vi.fn(async () => ({
+      connection: { config: {} },
+      query: vi.fn((sql: string, params?: unknown[]) => run('pool', sql, params)),
+      release: vi.fn(),
+      destroy: vi.fn(),
+    })),
     end: vi.fn(async () => {}),
   }));
 
   createConnection.mockImplementation(async (options: { database: string }) => {
     const connection = {
       database: options.database,
+      connection: { config: {} },
       query: vi.fn((sql: string, params?: unknown[]) => run(options.database, sql, params)),
       end: vi.fn(async () => {}),
+      destroy: vi.fn(),
     };
     fake.connections.push(connection);
     return connection;

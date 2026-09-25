@@ -9,8 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * server would hide rather than prove.
  */
 const createPool = vi.fn();
+const createConnection = vi.fn();
 
-vi.mock('mysql2/promise', () => ({ default: { createPool } }));
+vi.mock('mysql2/promise', () => ({ default: { createPool, createConnection } }));
 
 const DOLT_ENV = [
   'DOLT_HOST',
@@ -28,14 +29,24 @@ function fakePool() {
   const calls: Array<{ sql: string; params: unknown[] }> = [];
   const results: unknown[] = [];
 
-  const pool = {
-    calls,
-    queue: (result: unknown) => results.push(result),
-    end: vi.fn(async () => {}),
+  // `connection` stands in for mysql2's core connection, which the client
+  // reads for its TLS host check; with no `ssl` in its config there is none.
+  const connection = {
+    connection: { config: {} } as Record<string, unknown>,
     query: vi.fn(async (sql: string, params: unknown[] = []) => {
       calls.push({ sql, params });
       return [results.shift() ?? [], []];
     }),
+    release: vi.fn(),
+    destroy: vi.fn(),
+  };
+
+  const pool = {
+    calls,
+    connection,
+    queue: (result: unknown) => results.push(result),
+    end: vi.fn(async () => {}),
+    getConnection: vi.fn(async () => connection),
   };
 
   createPool.mockReturnValue(pool);
@@ -60,6 +71,7 @@ beforeEach(() => {
     delete process.env[key];
   }
   createPool.mockReset();
+  createConnection.mockReset();
 });
 
 afterEach(() => {
@@ -159,6 +171,166 @@ describe('pool configuration', () => {
     expect(ssl.ca.toString()).toBe(pem);
     // Verification stays on: trusting one CA is not the same as accepting any.
     expect(ssl).not.toHaveProperty('rejectUnauthorized');
+  });
+
+  it('asks mysql2 to check a DNS host name during the TLS handshake', async () => {
+    process.env.DOLT_TLS_CA_B64 = Buffer.from('ca').toString('base64');
+    fakePool();
+    const { query } = await loadClient();
+
+    await query('SELECT 1');
+
+    expect(createPool.mock.calls[0][0].ssl.verifyIdentity).toBe(true);
+  });
+
+  it('leaves mysql2 verifyIdentity off for an IP host, which mysql2 would check as "localhost"', async () => {
+    process.env.DOLT_HOST = '203.0.113.10';
+    process.env.DOLT_TLS_CA_B64 = Buffer.from('ca').toString('base64');
+    fakePool();
+    const { query } = await loadClient();
+
+    await query('SELECT 1');
+
+    expect(createPool.mock.calls[0][0].ssl.verifyIdentity).toBe(false);
+  });
+});
+
+describe('server certificate host check', () => {
+  /** A certificate as `getPeerCertificate()` returns it, for one SAN. */
+  function peerCertificate(subjectaltname: string, cn: string) {
+    return { subject: { CN: cn }, subjectaltname };
+  }
+
+  /**
+   * Point the fake pool's connection at a TLS socket presenting `cert`, or at
+   * a resumed session (no certificate). `ssl` is the pool's shared options
+   * object, as in mysql2.
+   */
+  function tlsConnection(
+    fake: ReturnType<typeof fakePool>,
+    cert: object,
+    { resumed = false, ssl = { ca: Buffer.from('ca') } } = {}
+  ) {
+    fake.connection.connection = {
+      config: { ssl },
+      stream: { getPeerCertificate: () => (resumed ? {} : cert), isSessionReused: () => resumed },
+    };
+    return ssl;
+  }
+
+  beforeEach(() => {
+    process.env.DOLT_DATABASE = 'fire_enrich';
+    process.env.DOLT_TLS_CA_B64 = Buffer.from('ca').toString('base64');
+  });
+
+  it('runs the query when an IP-SAN certificate names the IP host', async () => {
+    process.env.DOLT_HOST = '203.0.113.10';
+    const fake = fakePool();
+    tlsConnection(fake, peerCertificate('IP Address:203.0.113.10', 'fire-enrich-dolt'));
+    const { query } = await loadClient();
+
+    await query('SELECT 1');
+
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.connection.release).toHaveBeenCalled();
+  });
+
+  it('refuses an IP host whose certificate names another address, before any statement', async () => {
+    process.env.DOLT_HOST = '203.0.113.10';
+    const fake = fakePool();
+    tlsConnection(fake, peerCertificate('IP Address:198.51.100.7', 'fire-enrich-dolt'));
+    const { query } = await loadClient();
+
+    await expect(query('SELECT 1')).rejects.toMatchObject({ code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+    expect(fake.calls).toHaveLength(0);
+    expect(fake.connection.destroy).toHaveBeenCalled();
+    expect(fake.connection.release).not.toHaveBeenCalled();
+  });
+
+  it('refuses an IP host whose certificate names only localhost', async () => {
+    process.env.DOLT_HOST = '127.0.0.1';
+    const fake = fakePool();
+    tlsConnection(fake, peerCertificate('DNS:localhost', 'localhost'));
+    const { query } = await loadClient();
+
+    await expect(query('SELECT 1')).rejects.toMatchObject({ code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('leaves a DNS host to the handshake check mysql2 runs with verifyIdentity', async () => {
+    process.env.DOLT_HOST = 'dolt.example.com';
+    const fake = fakePool();
+    // A resumed session: there is no certificate to read, and none is needed.
+    tlsConnection(fake, {}, { resumed: true });
+    const { query } = await loadClient();
+
+    await query('SELECT 1');
+
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('accepts a resumed session once a full handshake with that ssl object passed', async () => {
+    process.env.DOLT_HOST = '203.0.113.10';
+    const fake = fakePool();
+    const ssl = tlsConnection(fake, peerCertificate('IP Address:203.0.113.10', 'x'));
+    const { query } = await loadClient();
+    await query('SELECT 1');
+
+    tlsConnection(fake, {}, { resumed: true, ssl });
+    await query('SELECT 2');
+
+    expect(fake.calls).toHaveLength(2);
+  });
+
+  it('refuses a resumed session with no checked full handshake behind it', async () => {
+    process.env.DOLT_HOST = '203.0.113.10';
+    const fake = fakePool();
+    tlsConnection(fake, {}, { resumed: true });
+    const { query } = await loadClient();
+
+    await expect(query('SELECT 1')).rejects.toThrow(/resumed a TLS session/);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('refuses a resumed session after a full handshake with that ssl object failed', async () => {
+    process.env.DOLT_HOST = '203.0.113.10';
+    const fake = fakePool();
+    const ssl = tlsConnection(fake, peerCertificate('IP Address:203.0.113.10', 'x'));
+    const { query } = await loadClient();
+    await query('SELECT 1');
+
+    tlsConnection(fake, peerCertificate('IP Address:198.51.100.7', 'x'), { ssl });
+    await expect(query('SELECT 2')).rejects.toMatchObject({ code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+
+    tlsConnection(fake, {}, { resumed: true, ssl });
+    await expect(query('SELECT 3')).rejects.toThrow(/resumed a TLS session/);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('refuses a connection that is not TLS although DOLT_TLS_CA_B64 is set', async () => {
+    process.env.DOLT_HOST = '203.0.113.10';
+    const fake = fakePool();
+    fake.connection.connection = { config: { ssl: { ca: Buffer.from('ca') } }, stream: {} };
+    const { query } = await loadClient();
+
+    await expect(query('SELECT 1')).rejects.toThrow(/not using TLS/);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('checks a dedicated connection from connect() the same way', async () => {
+    process.env.DOLT_HOST = '203.0.113.10';
+    const destroy = vi.fn();
+    createConnection.mockResolvedValue({
+      connection: {
+        config: { ssl: { ca: Buffer.from('ca') } },
+        stream: { getPeerCertificate: () => peerCertificate('IP Address:198.51.100.7', 'x') },
+      },
+      destroy,
+    });
+    const { connect } = await loadClient();
+
+    await expect(connect('run/abc')).rejects.toMatchObject({ code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+    expect(destroy).toHaveBeenCalled();
   });
 });
 

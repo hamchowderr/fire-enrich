@@ -158,6 +158,9 @@ chmod 600 deploy/dolt/certs/server.key
 If the app connects by IP address, use `-subj "/CN=203.0.113.10"` and
 `-addext "subjectAltName=IP:203.0.113.10"` (with your address).
 
+The app refuses a certificate that does not name `DOLT_HOST` (step 5). If
+`DOLT_HOST` changes, make a new certificate for the new name.
+
 `deploy/dolt/dolt.env` and `deploy/dolt/certs/` are gitignored. Do not commit
 them.
 
@@ -209,17 +212,23 @@ base64 -w0 deploy/dolt/certs/server.crt; echo
 On macOS, use `base64 -i deploy/dolt/certs/server.crt`. This is the
 certificate, not the key. Never copy `server.key` off the server.
 
-> **Known gap: the app does not check the host name.** `mysql2` checks the
-> certificate chain, but it checks the host name only when
-> `ssl.verifyIdentity` is set, and `lib/dolt.ts` does not set it. The app
-> therefore accepts any certificate that the configured CA signed, whatever
-> host it names. This is safe only while `DOLT_TLS_CA_B64` is exactly this
-> one self-signed server certificate, which signs nothing else. **Never set
-> `DOLT_TLS_CA_B64` to a shared or organisation CA.** A CA that signs other
-> certificates would let any of those certificates impersonate this server.
-> Still put the correct name in the certificate (step 2): clients that check
-> host names need it, such as `mysql --ssl-mode=VERIFY_IDENTITY`, and so does
-> the app once `lib/dolt.ts` sets `ssl.verifyIdentity`.
+The app also checks that the certificate names `DOLT_HOST`, and refuses the
+connection if it does not. This is why step 2 puts `DOLT_HOST` in the
+certificate's subject alternative name.
+
+- If `DOLT_HOST` is a DNS name, `mysql2` checks the name during the TLS
+  handshake (`ssl.verifyIdentity`), before it sends the user name and
+  password.
+- If `DOLT_HOST` is an IP address, `mysql2` cannot check it. The app checks
+  the address itself, after the connection opens and before it sends the
+  first statement. The login has then already happened. Use a DNS name if the
+  check must happen before the login.
+
+`scripts/db-migrate.mjs` uses the same checks (`lib/dolt-tls.mjs`).
+
+Set `DOLT_TLS_CA_B64` to this server's own certificate only, not to a shared
+or organisation CA. A CA that signs other certificates lets each of those
+servers pass the certificate-chain check.
 
 ### 6. Set the Vercel environment variables
 

@@ -36,6 +36,7 @@ import {
   doltConfigState,
   doltMisconfiguredMessage,
 } from '../lib/dolt-config.mjs';
+import { doltServerIdentityError, doltSslOptions } from '../lib/dolt-tls.mjs';
 
 const SCHEMA_PATH = fileURLToPath(new URL('../db/schema.sql', import.meta.url));
 const AUTHOR = 'Fire Enrich Migrate <fire-enrich@localhost>';
@@ -63,9 +64,21 @@ if (config.state === 'off') {
 }
 
 // Mirrors lib/dolt.ts: pass the CA so verification stays on against a server's
-// self-signed certificate. Unset locally, where there is no TLS.
-const ssl = tlsCa ? { ca: Buffer.from(tlsCa, 'base64') } : undefined;
+// self-signed certificate, and check that the certificate names DOLT_HOST.
+// Unset locally, where there is no TLS.
+const ssl = doltSslOptions(host, tlsCa);
 const base = { host, port, user, password, ...(ssl ? { ssl } : {}) };
+
+/** Open a connection, and close it again if the server's certificate does not name DOLT_HOST. */
+async function connect(options) {
+  const connection = await mysql.createConnection(options);
+  const error = doltServerIdentityError(connection.connection, host);
+  if (error) {
+    connection.destroy();
+    throw error;
+  }
+  return connection;
+}
 
 /**
  * Split the schema file into statements.
@@ -96,7 +109,7 @@ async function main() {
   // database is missing: an app user can own its database without a
   // server-wide CREATE right, and for that user an unconditional CREATE
   // DATABASE is denied even though the database already exists.
-  const admin = await mysql.createConnection(base);
+  const admin = await connect(base);
   try {
     const [found] = await admin.query(
       'SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?',
@@ -109,7 +122,7 @@ async function main() {
     await admin.end();
   }
 
-  const connection = await mysql.createConnection({ ...base, database });
+  const connection = await connect({ ...base, database });
   try {
     const schema = statements(await readFile(SCHEMA_PATH, 'utf8'));
     for (const statement of schema) await connection.query(statement);
