@@ -99,7 +99,7 @@ const CHAT_BODY = {
 
 const SCRAPE_BODY = { url: 'https://firecrawl.dev' };
 
-const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN', 'TURSO_DATABASE_URL', 'DOLT_HOST'] as const;
+const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN', 'TURSO_DATABASE_URL', 'DOLT_HOST', 'DOLT_DATABASE'] as const;
 const saved: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
 
 /** The global `@vercel/oidc` reads the request context from (see its `get-context.js`). */
@@ -310,6 +310,7 @@ describe('GET /api/check-env', () => {
     process.env.AI_GATEWAY_API_KEY = 'gw-secret-value';
     process.env.TURSO_DATABASE_URL = 'libsql://secret.turso.io';
     process.env.DOLT_HOST = 'dolt.internal';
+    process.env.DOLT_DATABASE = 'fire_enrich_secret';
 
     const response = await checkEnv();
     const body = await response.json();
@@ -317,7 +318,6 @@ describe('GET /api/check-env', () => {
     expect(response.status).toBe(200);
     expect(Object.keys(body.environmentStatus).sort()).toEqual([
       'AI_GATEWAY_API_KEY',
-      'DOLT_HOST',
       'FIRECRAWL_API_KEY',
       'OPENAI_API_KEY',
       'TURSO_DATABASE_URL',
@@ -331,11 +331,15 @@ describe('GET /api/check-env', () => {
       // The UI reads the gateway key's presence under this name.
       OPENAI_API_KEY: true,
       TURSO_DATABASE_URL: true,
-      DOLT_HOST: true,
+    });
+    expect(body.optional.dolt).toEqual({
+      required: false,
+      configured: true,
+      enables: ['versioned run history', 'run diffs'],
     });
 
     const text = JSON.stringify(body);
-    for (const secret of ['fc-secret-value', 'gw-secret-value', 'secret.turso.io', 'dolt.internal']) {
+    for (const secret of ['fc-secret-value', 'gw-secret-value', 'secret.turso.io', 'dolt.internal', 'fire_enrich_secret']) {
       expect(text).not.toContain(secret);
     }
   });
@@ -362,7 +366,6 @@ describe('GET /api/check-env', () => {
       AI_GATEWAY_API_KEY: true,
       OPENAI_API_KEY: true,
       TURSO_DATABASE_URL: false,
-      DOLT_HOST: false,
     });
     expect(JSON.stringify(body)).not.toContain(OIDC_TOKEN);
   });
@@ -377,8 +380,18 @@ describe('GET /api/check-env', () => {
       AI_GATEWAY_API_KEY: false,
       OPENAI_API_KEY: false,
       TURSO_DATABASE_URL: false,
-      DOLT_HOST: false,
     });
+  });
+
+  it('reports Dolt as optional and not configured, outside the required settings', async () => {
+    for (const key of ENV) delete process.env[key];
+    // DOLT_HOST alone is not a configured Dolt: DOLT_DATABASE is required too.
+    process.env.DOLT_HOST = 'dolt.internal';
+
+    const body = await (await checkEnv()).json();
+
+    expect(body.environmentStatus).not.toHaveProperty('DOLT_HOST');
+    expect(body.optional.dolt).toMatchObject({ required: false, configured: false });
   });
 });
 

@@ -279,13 +279,31 @@ describe('previousRunFor', () => {
 });
 
 describe('GET /api/runs/:id/diff', () => {
-  it('answers 503 when Dolt is not configured, without touching the database', async () => {
+  it('answers 501 "requires Dolt" when Dolt is not configured, without touching the database', async () => {
     delete process.env.DOLT_HOST;
 
     const { status, body } = await getDiff('run_b');
 
-    expect(status).toBe(503);
-    expect(body.error).toMatch(/Run diffs need a Dolt database/);
+    // Dolt is optional: not configured is "this deployment has no run
+    // history", not a 503 outage.
+    expect(status).toBe(501);
+    expect(body).toMatchObject({
+      code: 'dolt_not_configured',
+      feature: 'Run diffs',
+      requires: 'dolt',
+      env: ['DOLT_HOST', 'DOLT_DATABASE'],
+    });
+    expect(body.error).toMatch(/^Run diffs requires Dolt, which is optional and not configured/);
+    expect(body.error).toContain('DOLT_HOST and DOLT_DATABASE');
+    expect(fake.log).toEqual([]);
+  });
+
+  it('treats a missing DOLT_DATABASE as not configured too', async () => {
+    delete process.env.DOLT_DATABASE;
+
+    const { status } = await getDiff('run_b');
+
+    expect(status).toBe(501);
     expect(fake.log).toEqual([]);
   });
 

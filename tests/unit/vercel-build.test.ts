@@ -17,6 +17,24 @@ describe('migrationPlan', () => {
     expect(plan.reason).toContain('DOLT_DATABASE');
   });
 
+  it('skips every build with no DOLT_* at all, and says Dolt is optional', () => {
+    for (const env of [
+      { VERCEL_ENV: 'production' },
+      { VERCEL_ENV: 'preview', DOLT_PREVIEW_MIGRATE: '1' },
+      { VERCEL_ENV: 'development' },
+      {},
+    ]) {
+      const plan = migrationPlan(env);
+      expect(plan.migrate).toBe(false);
+      expect(plan.reason).toBe('Dolt is not configured (optional; set DOLT_HOST and DOLT_DATABASE to enable it)');
+    }
+  });
+
+  it('counts an empty DOLT_HOST or DOLT_DATABASE as not configured', () => {
+    expect(migrationPlan({ VERCEL_ENV: 'production', DOLT_HOST: '', DOLT_DATABASE: 'fire_enrich' }).migrate).toBe(false);
+    expect(migrationPlan({ VERCEL_ENV: 'production', DOLT_HOST: 'dolt.example', DOLT_DATABASE: '' }).migrate).toBe(false);
+  });
+
   it('never migrates a preview build by default, even with Dolt configured', () => {
     const plan = migrationPlan({ VERCEL_ENV: 'preview', ...DOLT });
 

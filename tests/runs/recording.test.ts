@@ -53,17 +53,26 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('RunRecording without Dolt', () => {
-  it('does not throw, touches no database, and warns once on the first recorded row', async () => {
-    const { recording, warnings } = await start();
+describe('RunRecording without Dolt (optional, not configured)', () => {
+  // First in the file on purpose: the one info line is logged once per
+  // process, and the adapter module is imported once for the whole file.
+  it('does not throw, touches no database, warns nothing, and logs one info line per process', async () => {
+    const infoLog = vi.spyOn(console, 'info').mockImplementation(() => {});
 
-    await recording.recordRow(0, 'a@a.example', { headline: ENRICHMENT }, {});
-    await recording.recordRow(1, 'b@b.example', { headline: ENRICHMENT }, {});
-    await expect(recording.finish('completed')).resolves.toBeNull();
+    for (const session of [0, 1]) {
+      const { recording, warnings } = await start();
 
-    expect(warnings).toEqual([{ rowIndex: 0, message: 'run not recorded: storage unavailable', messageType: 'warning' }]);
-    expect(warnLog).toHaveBeenCalledTimes(1);
-    expect(warnLog).toHaveBeenCalledWith(expect.stringContaining('Dolt is not configured'));
+      await recording.recordRow(0, `a${session}@a.example`, { headline: ENRICHMENT }, {});
+      await recording.recordRow(1, `b${session}@b.example`, { headline: ENRICHMENT }, {});
+      await expect(recording.finish('completed')).resolves.toBeNull();
+
+      expect(recording.committedRunId).toBeNull();
+      expect(warnings).toEqual([]);
+    }
+
+    expect(warnLog).not.toHaveBeenCalled();
+    expect(infoLog).toHaveBeenCalledTimes(1);
+    expect(infoLog).toHaveBeenCalledWith('[RUNS] Dolt is not configured (optional): enrichment runs are not recorded.');
     expect(createPool).not.toHaveBeenCalled();
     expect(createConnection).not.toHaveBeenCalled();
   });

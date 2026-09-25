@@ -31,7 +31,7 @@
  * do not count (they are written before a fetch, so a failed scrape has one),
  * and neither do evidence urls, which would make the check circular.
  */
-import { doltConfigured } from '@/lib/dolt';
+import { isDoltConfigured } from '@/lib/dolt';
 import { abandonRun, finishRun, recordRow, startRun, type FieldStrategies, type FinishStatus } from '@/lib/runs';
 import type { CSVRow, EnrichmentResult, RowEnrichmentResult } from '@/lib/types';
 
@@ -226,12 +226,16 @@ const RUN_NOT_RECORDED = 'run not recorded: storage unavailable';
  * A session's run in Dolt (`lib/runs.ts`), wrapped so that storage can never
  * fail enrichment.
  *
- * Every Dolt call is caught. The first failure (Dolt not configured, the
- * server down, a write rejected) is logged once with its cause, shown once as
- * the `agent_progress` warning {@link RUN_NOT_RECORDED}, and the recording
- * stops; rows keep streaming as if nothing happened. A failure at start is
- * shown on the first row the run would have recorded, so a session whose rows
- * are all skipped (nothing to record) stays quiet.
+ * Every Dolt call is caught. The first failure (the server down, a write
+ * rejected) is logged once with its cause, shown once as the `agent_progress`
+ * warning {@link RUN_NOT_RECORDED}, and the recording stops; rows keep
+ * streaming as if nothing happened. A failure at start is shown on the first
+ * row the run would have recorded, so a session whose rows are all skipped
+ * (nothing to record) stays quiet.
+ *
+ * With Dolt not configured there is nothing to fail: Dolt is optional, and
+ * the recording is {@link RunRecording.disabled} — inert, with no warning in
+ * the stream and no per-run line in the log.
  *
  * @public The route creates one per session with {@link startRunRecording}.
  */
@@ -259,6 +263,17 @@ export class RunRecording {
     private readonly warn: (rowIndex: number, line: ProgressLine) => void
   ) {
     this.failed = startFailed;
+  }
+
+  /**
+   * A recording for a deployment without Dolt: records nothing, commits
+   * nothing, warns nothing. `committedRunId` stays null, so the UI never asks
+   * for a run diff.
+   */
+  static disabled(): RunRecording {
+    // No run id and no failure: `recordRow` and `finish` return at once, and
+    // there is never a failure to surface.
+    return new RunRecording(null, false, () => undefined);
   }
 
   private fail(reason: unknown, rowIndex: number): void {
@@ -314,10 +329,17 @@ export class RunRecording {
   }
 }
 
+/** Whether the one "runs are not recorded" line has been logged in this process. */
+let loggedDoltOff = false;
+
 /**
- * Start recording a session's run, once its plan is resolved. Never throws:
- * with Dolt unconfigured or unreachable the recording is inert, logs why, and
- * shows the generic warning on the first row.
+ * Start recording a session's run, once its plan is resolved. Never throws.
+ *
+ * - Dolt not configured: {@link RunRecording.disabled}. Dolt is optional, so
+ *   this is a supported mode, not a failure: one info line per process, no
+ *   per-run warning.
+ * - Dolt configured but unreachable: an inert recording that logs why and
+ *   shows the generic warning on the first row.
  *
  * `planId` is the saved plan's id when the plan came from one; a plan from
  * the planner fallback has none, and the run's `plan_id` is null.
@@ -331,9 +353,12 @@ export async function startRunRecording({
   listRef: string;
   warn: (rowIndex: number, line: ProgressLine) => void;
 }): Promise<RunRecording> {
-  if (!doltConfigured()) {
-    console.warn('[RUNS] run not recorded: Dolt is not configured (DOLT_HOST, DOLT_DATABASE)');
-    return new RunRecording(null, true, warn);
+  if (!isDoltConfigured()) {
+    if (!loggedDoltOff) {
+      loggedDoltOff = true;
+      console.info('[RUNS] Dolt is not configured (optional): enrichment runs are not recorded.');
+    }
+    return RunRecording.disabled();
   }
   try {
     const runId = await startRun({ planId: planId ?? null, listRef });

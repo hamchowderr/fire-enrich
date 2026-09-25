@@ -2,7 +2,7 @@ import { Agent } from '@mastra/core/agent';
 import type { RequestContext } from '@mastra/core/request-context';
 import { z } from 'zod';
 
-import { doltConfigured } from '@/lib/dolt';
+import { isDoltConfigured } from '@/lib/dolt';
 import { getProfile, listProfiles, resolveProfileModels, type Profile } from '@/lib/profiles';
 import { generateVariableName } from '@/lib/utils/field-utils';
 
@@ -80,7 +80,7 @@ const PROFILE_KEY = 'planner.profile';
  * that grace, because the caller asked for something specific.
  */
 export async function resolvePlannerProfile(profileId?: string): Promise<PlannerProfile> {
-  if (!doltConfigured()) return { profile: GENERIC_PROFILE, source: 'generic' };
+  if (!isDoltConfigured()) return { profile: GENERIC_PROFILE, source: 'generic' };
 
   if (profileId) {
     const requested = await getProfile(profileId);

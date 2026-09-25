@@ -150,8 +150,9 @@ export async function POST(request: NextRequest) {
           }
         };
 
-        // The session's run in Dolt. Never throws: with
-        // storage unavailable it says so once in the stream and rows go on.
+        // The session's run in Dolt. Never throws. Without Dolt (optional) it
+        // records nothing and says nothing; with Dolt configured but
+        // unavailable it says so once in the stream and rows go on.
         let recording: RunRecording | null = null;
 
         try {

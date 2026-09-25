@@ -69,27 +69,27 @@ afterEach(() => {
   }
 });
 
-describe('doltConfigured', () => {
+describe('isDoltConfigured', () => {
   it('is false when nothing is set, so the app boots without Dolt', async () => {
-    const { doltConfigured } = await loadClient();
+    const { isDoltConfigured } = await loadClient();
 
-    expect(doltConfigured()).toBe(false);
+    expect(isDoltConfigured()).toBe(false);
   });
 
   it('is false when only one of host and database is set', async () => {
     process.env.DOLT_HOST = '127.0.0.1';
-    const { doltConfigured } = await loadClient();
+    const { isDoltConfigured } = await loadClient();
 
-    expect(doltConfigured()).toBe(false);
+    expect(isDoltConfigured()).toBe(false);
   });
 
   it('is true with host and database set, even with an empty password', async () => {
     process.env.DOLT_HOST = '127.0.0.1';
     process.env.DOLT_DATABASE = 'fire_enrich';
     process.env.DOLT_PASSWORD = '';
-    const { doltConfigured } = await loadClient();
+    const { isDoltConfigured } = await loadClient();
 
-    expect(doltConfigured()).toBe(true);
+    expect(isDoltConfigured()).toBe(true);
   });
 
   it('throws instead of connecting when a query runs unconfigured', async () => {

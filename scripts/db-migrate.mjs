@@ -29,6 +29,8 @@ import { fileURLToPath } from 'node:url';
 
 import mysql from 'mysql2/promise';
 
+import { DOLT_REQUIRED_VARS, isDoltConfigured } from '../lib/dolt-config.mjs';
+
 const SCHEMA_PATH = fileURLToPath(new URL('../db/schema.sql', import.meta.url));
 const AUTHOR = 'Fire Enrich Migrate <fire-enrich@localhost>';
 
@@ -39,8 +41,13 @@ const password = process.env.DOLT_PASSWORD ?? '';
 const database = process.env.DOLT_DATABASE;
 const tlsCa = process.env.DOLT_TLS_CA_B64;
 
-if (!database) {
-  console.error('DOLT_DATABASE is not set. See .env.example for the DOLT_* variables.');
+// Run by hand, a migration with nothing to migrate is a mistake worth an
+// error. The Vercel build checks the same thing first and skips this script
+// when Dolt is not configured, so a deploy without Dolt never gets here.
+if (!isDoltConfigured()) {
+  console.error(
+    `Dolt is not configured: set ${DOLT_REQUIRED_VARS.join(' and ')}. See .env.example for the DOLT_* variables.`
+  );
   process.exit(1);
 }
 

@@ -45,10 +45,22 @@ describe('sweep-runs script', { timeout: 30_000 }, () => {
     expect(result.stdout.trim()).toBe(USAGE);
   });
 
-  it('loads lib/runs.ts under plain node and stops at the missing Dolt configuration', () => {
+  it('loads lib/runs.ts under plain node and, with no Dolt configured, says it requires Dolt and exits 0', () => {
     const result = sweep('--dry-run');
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('DOLT_HOST and DOLT_DATABASE are not set');
+    // Dolt is optional: no Dolt means no recorded runs, so nothing to sweep.
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('db:sweep-runs requires Dolt, which is not configured');
+    expect(result.stdout).toContain('DOLT_HOST and DOLT_DATABASE');
+    expect(result.stderr).toBe('');
+  });
+
+  it('counts Dolt as not configured when only one of DOLT_HOST and DOLT_DATABASE is set', () => {
+    const env: NodeJS.ProcessEnv = { ...process.env, DOLT_HOST: '127.0.0.1' };
+    delete env.DOLT_DATABASE;
+    const result = spawnSync(process.execPath, [SCRIPT], { encoding: 'utf8', env });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('requires Dolt');
   });
 });

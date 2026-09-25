@@ -15,11 +15,14 @@
  *   told to trust that CA; local dev has no TLS and leaves this unset. It is
  *   base64 because a PEM is multi-line and environment variables are not.
  *
- * Dolt is optional: the app boots and serves every non-Dolt route with none of
- * these set. Callers check {@link doltConfigured} and answer 503 rather than
+ * Dolt is optional: the app boots, enriches and chats with none of these set.
+ * Callers check {@link isDoltConfigured} first — the enrichment route skips run
+ * recording, the run-history routes answer "requires Dolt" (501) — rather than
  * letting a connection attempt fail deep inside a request.
  */
 import mysql from 'mysql2/promise';
+
+import { isDoltConfigured } from './dolt-config.mjs';
 
 /** Environment-variable names this module reads, in one place. */
 const ENV = {
@@ -32,22 +35,10 @@ const ENV = {
 } as const;
 
 /**
- * Whether Dolt is configured well enough to attempt a connection.
- *
- * `DOLT_HOST` and `DOLT_DATABASE` are the two that have no sensible default:
- * a host guess would connect to the wrong machine and a database guess would
- * read the wrong data. Port, user and password do have defaults (a local
- * `dolt sql-server` is 127.0.0.1:3306, root, no password), and an empty
- * password is a legitimate local value — so `DOLT_PASSWORD=''` must not read as
- * "unconfigured".
- *
- * Read as a function rather than a module-level constant: route handlers are
- * evaluated at build time by Next, when the deployment environment is not yet
- * present, and tests set these variables per case.
+ * Whether Dolt is configured: `DOLT_HOST` and `DOLT_DATABASE` are both set.
+ * The one check the whole app uses; see `lib/dolt-config.mjs` for why those two.
  */
-export function doltConfigured(): boolean {
-  return Boolean(process.env[ENV.host] && process.env[ENV.database]);
-}
+export { isDoltConfigured };
 
 /** Connection settings assembled from the environment at first use. */
 function config(): mysql.PoolOptions {
@@ -84,7 +75,7 @@ let cachedPool: mysql.Pool | null = null;
  */
 function pool(): mysql.Pool {
   if (!cachedPool) {
-    if (!doltConfigured()) {
+    if (!isDoltConfigured()) {
       throw new Error(
         `Dolt is not configured: set ${ENV.host} and ${ENV.database} (see .env.example).`
       );
@@ -224,7 +215,7 @@ export function isNothingToCommit(error: unknown): boolean {
  */
 function databaseName(): string {
   const database = process.env[ENV.database];
-  if (!doltConfigured() || !database) {
+  if (!isDoltConfigured() || !database) {
     throw new Error(
       `Dolt is not configured: set ${ENV.host} and ${ENV.database} (see .env.example).`
     );

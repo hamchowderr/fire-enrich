@@ -8,7 +8,7 @@ import type { ResearchPlanType } from '@/lib/mastra/schemas';
  *
  * `lib/plans` is mocked, so the second layer is whatever `findPlanByFieldSet`
  * is told to answer and no database is involved. Dolt "configured" is the
- * environment switch `doltConfigured` reads, set per case.
+ * environment switch `isDoltConfigured` reads, set per case.
  */
 const { findPlanByFieldSet } = vi.hoisted(() => ({
   findPlanByFieldSet: vi.fn<(fieldNames: readonly string[]) => Promise<SavedPlan | null>>(),
