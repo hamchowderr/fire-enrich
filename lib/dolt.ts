@@ -16,6 +16,8 @@
  *   Node unless it is told to trust that CA; a server without TLS, such as a
  *   local dev server, leaves this unset. It is
  *   base64 because a PEM is multi-line and environment variables are not.
+ *   With it set, the server's certificate must also name `DOLT_HOST` (a DNS
+ *   name or an IP address); see `lib/dolt-tls.mjs`.
  *
  * Dolt is optional: the app boots, enriches and chats with none of these set.
  * Callers check {@link isDoltConfigured} first — the enrichment route skips run
@@ -25,6 +27,7 @@
 import mysql from 'mysql2/promise';
 
 import { isDoltConfigured } from './dolt-config.mjs';
+import { doltServerIdentityError, doltSslOptions } from './dolt-tls.mjs';
 
 /** Environment-variable names this module reads, in one place. */
 const ENV = {
@@ -42,12 +45,17 @@ const ENV = {
  */
 export { isDoltConfigured };
 
+/** The configured host, or a local server's address. */
+function host(): string {
+  return process.env[ENV.host] ?? '127.0.0.1';
+}
+
 /** Connection settings assembled from the environment at first use. */
 function config(): mysql.PoolOptions {
-  const ca = process.env[ENV.tlsCa];
+  const ssl = doltSslOptions(host(), process.env[ENV.tlsCa]);
 
   return {
-    host: process.env[ENV.host] ?? '127.0.0.1',
+    host: host(),
     port: Number(process.env[ENV.port] ?? 3306),
     user: process.env[ENV.user] ?? 'root',
     password: process.env[ENV.password] ?? '',
@@ -59,8 +67,10 @@ function config(): mysql.PoolOptions {
     connectionLimit: 4,
     // Trust exactly the CA that signed the server's certificate. Passing the CA
     // keeps verification on, unlike `rejectUnauthorized: false`, which would
-    // accept any certificate and defeat the point of TLS.
-    ...(ca ? { ssl: { ca: Buffer.from(ca, 'base64') } } : {}),
+    // accept any certificate and defeat the point of TLS. The host name is
+    // checked too: by mysql2 during the handshake for a DNS name, and by
+    // `assertServerIdentity` for an IP address.
+    ...(ssl ? { ssl } : {}),
   };
 }
 
@@ -95,8 +105,33 @@ function pool(): mysql.Pool {
  * way user input reaches a query in this codebase.
  */
 export async function query<T = unknown>(sql: string, params: unknown[] = []): Promise<T> {
-  const [result] = await pool().query(sql, params);
-  return result as T;
+  const connection = await pool().getConnection();
+  assertServerIdentity(connection);
+  try {
+    const [result] = await connection.query(sql, params);
+    return result as T;
+  } finally {
+    connection.release();
+  }
+}
+
+/**
+ * Close the connection and throw when `DOLT_HOST` is an IP address and the
+ * server's certificate does not name it.
+ *
+ * Runs before a connection's first statement, and again before every
+ * statement on a pooled connection (the check is one certificate comparison).
+ * `mysql2` checks a DNS name during the handshake but not an IP address; see
+ * `lib/dolt-tls.mjs`.
+ */
+function assertServerIdentity(connection: mysql.Connection | mysql.PoolConnection): void {
+  // The promise wrapper keeps the core connection (its `ssl` config and TLS
+  // socket) on `connection`; mysql2 types it on PoolConnection only.
+  const core = (connection as mysql.PoolConnection).connection;
+  const error = doltServerIdentityError(core, host());
+  if (!error) return;
+  connection.destroy();
+  throw error;
 }
 
 /**
@@ -203,8 +238,10 @@ export async function connect(branch?: string): Promise<mysql.Connection> {
   const { connectionLimit, ...options } = config();
   void connectionLimit;
 
-  return mysql.createConnection({
+  const connection = await mysql.createConnection({
     ...options,
     database: branch ? `${database}/${branch}` : database,
   });
+  assertServerIdentity(connection);
+  return connection;
 }
