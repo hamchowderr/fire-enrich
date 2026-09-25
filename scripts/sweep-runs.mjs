@@ -5,14 +5,15 @@
  *   DOLT_HOST=127.0.0.1 DOLT_PORT=3306 DOLT_USER=root DOLT_PASSWORD= \
  *   DOLT_DATABASE=fire_enrich npm run db:sweep-runs -- [--older-than-hours 6] [--dry-run]
  *
- * A branch with no recorded write for more than `--older-than-hours` (default
- * 6) is abandoned. Its finished rows are committed and merged into `main`: as
+ * A branch idle for more than `--older-than-hours` (default 6) is abandoned:
+ * its run's heartbeat (`last_activity_at`), finish and branch commit are all
+ * older than that. Its finished rows are committed and merged into `main`: as
  * a `partial` run, the outcome a cancel gives, or as `failed` when the app
  * gave the run up after a failed write. A run `main` already holds only loses
  * its branch. One line is printed per branch removed. `--dry-run` prints what
  * a sweep would do and writes nothing. See `sweepAbandonedRuns` in
  * `lib/runs.ts`, which does the work with the app's own commit and merge code,
- * and says what "recorded write" can and cannot see.
+ * and says how idle time is measured.
  *
  * Exits 0 when every abandoned branch was swept, or there was none; 1 when
  * any branch failed, after sweeping the rest, or Dolt is unreachable; 2 on a

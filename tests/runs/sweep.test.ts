@@ -23,6 +23,10 @@ interface Branch {
   id: string;
   /** Seconds since the run started, as the sweep's query answers it. */
   sinceStart: number;
+  /** Seconds since `last_activity_at`; NULL (a legacy row) when absent. */
+  sinceActivity?: number;
+  /** A branch cut before the migration: no `last_activity_at` column. */
+  legacy?: boolean;
   /** Seconds since `finished_at`; NULL (never set) when absent. */
   sinceFinish?: number;
   /** Seconds since the branch head's commit; NULL when absent. */
@@ -43,6 +47,9 @@ function setUp(branches: Branch[]) {
   const byDb = new Map(branches.map((branch) => [branchDb(branch.id), branch]));
 
   fake.respond(/FROM dolt_branches/, () => branches.map((branch) => ({ name: `run/${branch.id}` })));
+  fake.respond(/SHOW COLUMNS FROM enrichment_runs/, ({ on }: Statement) =>
+    byDb.get(on)?.legacy ? [] : [{ Field: 'last_activity_at' }]
+  );
   fake.respond(/TIMESTAMPDIFF/, ({ on }: Statement) => {
     const branch = byDb.get(on);
     if (!branch || branch.noRow) return [];
@@ -52,6 +59,7 @@ function setUp(branches: Branch[]) {
         plan_id: 'plan_1',
         list_ref: 'contacts.csv',
         status: branch.status ?? 'running',
+        since_activity: branch.sinceActivity === undefined ? null : String(branch.sinceActivity),
         since_start: String(branch.sinceStart),
         since_finish: branch.sinceFinish === undefined ? null : String(branch.sinceFinish),
         since_commit: branch.sinceCommit === undefined ? null : String(branch.sinceCommit),
@@ -110,7 +118,7 @@ describe('sweepAbandonedRuns', () => {
       'Plan-Id: plan_1',
       'List-Ref: contacts.csv',
       'Status: partial',
-      'Swept: abandoned run branch, no recorded write for 6h',
+      'Swept: abandoned run branch, idle for 6h',
     ]);
     const runCommit = fake.hashes[0];
 
@@ -150,11 +158,53 @@ describe('sweepAbandonedRuns', () => {
 
     const [idle] = fake.find(/TIMESTAMPDIFF/, branchDb('live1'));
     const sql = idle.sql.replace(/\s+/g, ' ');
+    expect(sql).toContain('TIMESTAMPDIFF(SECOND, r.last_activity_at, CURRENT_TIMESTAMP) AS since_activity');
     expect(sql).toContain('TIMESTAMPDIFF(SECOND, r.started_at, CURRENT_TIMESTAMP) AS since_start');
     expect(sql).toContain('TIMESTAMPDIFF(SECOND, r.finished_at, CURRENT_TIMESTAMP) AS since_finish');
     expect(sql).toContain('TIMESTAMPDIFF(SECOND, b.latest_commit_date, UTC_TIMESTAMP()) AS since_commit');
     expect(sql).toContain('LEFT JOIN dolt_branches b ON b.name = ?');
     expect(idle.params).toEqual(['run/live1', 'live1']);
+  });
+
+  it('keeps a live run whose heartbeat is recent, however long ago it started', async () => {
+    setUp([
+      { id: 'longrun', sinceStart: 30 * HOUR, sinceActivity: 30, sinceCommit: 30 * HOUR },
+      { id: 'stale', sinceStart: 30 * HOUR, sinceActivity: 7 * HOUR, sinceCommit: 30 * HOUR },
+    ]);
+    const { sweepAbandonedRuns } = await loadRuns();
+
+    const { swept } = await sweepAbandonedRuns();
+
+    expect(swept.map((branch) => branch.branch)).toEqual(['run/stale']);
+    expect(fake.find(WRITES, branchDb('longrun'))).toEqual([]);
+  });
+
+  it('falls back to started_at for a legacy run whose heartbeat is NULL', async () => {
+    setUp([
+      { id: 'oldlegacy', sinceStart: 7 * HOUR },
+      { id: 'younglegacy', sinceStart: HOUR },
+    ]);
+    const { sweepAbandonedRuns } = await loadRuns();
+
+    const { swept } = await sweepAbandonedRuns();
+
+    expect(swept.map((branch) => branch.branch)).toEqual(['run/oldlegacy']);
+  });
+
+  it('reads a branch cut before the migration, which has no heartbeat column, by its other signals', async () => {
+    setUp([
+      { id: 'precol', sinceStart: 7 * HOUR, legacy: true },
+      { id: 'precolyoung', sinceStart: HOUR, legacy: true },
+    ]);
+    const { sweepAbandonedRuns } = await loadRuns();
+
+    const { swept } = await sweepAbandonedRuns();
+
+    // The column is not named on such a branch, so the query cannot fail on it.
+    const [idle] = fake.find(/TIMESTAMPDIFF/, branchDb('precol'));
+    expect(idle.sql).toMatch(/NULL AS since_activity/);
+    expect(idle.sql).not.toMatch(/last_activity_at/);
+    expect(swept.map((branch) => branch.branch)).toEqual(['run/precol']);
   });
 
   it('keeps a run that started long ago but wrote recently', async () => {
@@ -240,7 +290,7 @@ describe('sweepAbandonedRuns', () => {
     const { swept } = await sweepAbandonedRuns({ olderThanHours: 4 });
 
     expect(swept.map((branch) => branch.branch)).toEqual(['run/run5h']);
-    expect(fake.find(/DOLT_COMMIT/, branchDb('run5h'))[0].params[0]).toMatch(/Swept: abandoned run branch, no recorded write for 4h$/);
+    expect(fake.find(/DOLT_COMMIT/, branchDb('run5h'))[0].params[0]).toMatch(/Swept: abandoned run branch, idle for 4h$/);
     await expect(sweepAbandonedRuns({ olderThanHours: 0 })).rejects.toThrow(/positive number/);
   });
 
@@ -319,7 +369,7 @@ describe('sweepAbandonedRuns', () => {
 });
 
 describe('abandonRun', () => {
-  it('marks the run failed with finished_at on its branch before closing it', async () => {
+  it('marks the run failed with finished_at and a last heartbeat on its branch before closing it', async () => {
     const { abandonRun, startRun } = await loadRuns();
     const runId = await startRun({ listRef: 'x' });
 
@@ -328,7 +378,7 @@ describe('abandonRun', () => {
     expect(fake.find(/SET status/)).toEqual([
       {
         on: branchDb(runId),
-        sql: "UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'",
+        sql: "UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'",
         params: ['failed', runId],
       },
     ]);

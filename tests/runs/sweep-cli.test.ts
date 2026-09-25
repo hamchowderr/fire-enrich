@@ -18,7 +18,9 @@ function sweep(...args: string[]) {
   return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', env });
 }
 
-describe('sweep-runs script', () => {
+// Each case starts a Node process; under a full parallel suite that can take
+// longer than vitest's 5 s default.
+describe('sweep-runs script', { timeout: 30_000 }, () => {
   it('prints the usage line and exits 2 on an unknown flag, without a stack trace', () => {
     const result = sweep('--port', '3306');
 

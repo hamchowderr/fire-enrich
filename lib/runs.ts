@@ -108,6 +108,18 @@ const DEFAULT_COMMIT_AUTHOR = 'Fire Enrich <fire-enrich@localhost>';
 /** How often a merge into `main` is tried before the run is reported unmerged. */
 const MERGE_ATTEMPTS = 3;
 
+/**
+ * How long a row with nothing to record may go without moving the run's
+ * heartbeat (`last_activity_at`). Rows that record enrichments always move it,
+ * inside their own transaction; an empty row moves it only when it is this
+ * stale, so a run of empty rows costs one extra write a minute, not one per
+ * row. Far below any sweep threshold, which is hours.
+ */
+const IDLE_HEARTBEAT_MS = 60_000;
+
+/** Moves a run's heartbeat on its branch. */
+const TOUCH_RUN = 'UPDATE enrichment_runs SET last_activity_at = CURRENT_TIMESTAMP WHERE id = ?';
+
 /** `list_ref` is VARCHAR(512). */
 const LIST_REF_MAX = 512;
 
@@ -151,6 +163,8 @@ interface ActiveRun {
   connection: mysql.Connection;
   /** Tail of the run's writes; each write starts when the previous one settles. */
   writes: Promise<unknown>;
+  /** `Date.now()` when this process last moved the run's `last_activity_at`. */
+  touchedAt: number;
   rows: number;
   enrichments: number;
   evidence: number;
@@ -215,7 +229,8 @@ export async function startRun({
   try {
     connection = await connect(branch);
     let recordedPlanId = planId ?? null;
-    const insert = 'INSERT INTO enrichment_runs (id, plan_id, list_ref, status) VALUES (?, ?, ?, ?)';
+    const insert =
+      'INSERT INTO enrichment_runs (id, plan_id, list_ref, status, last_activity_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)';
 
     try {
       await connection.query(insert, [id, recordedPlanId, listRef.slice(0, LIST_REF_MAX), 'running']);
@@ -233,6 +248,7 @@ export async function startRun({
       listRef,
       connection,
       writes: Promise.resolve(),
+      touchedAt: Date.now(),
       rows: 0,
       enrichments: 0,
       evidence: 0,
@@ -281,7 +297,11 @@ function evidenceOf(enrichment: EnrichmentResult): Array<{ url: string; quote: s
 
 /**
  * Record one finished row: an `enrichments` row per field and an `evidence`
- * row per quote, in one SQL transaction on the run's branch.
+ * row per quote, in one SQL transaction on the run's branch. The same
+ * transaction moves the run's heartbeat (`last_activity_at`), so a run that
+ * is still recording never looks abandoned to the sweeper. A row with nothing
+ * to record moves it on its own when it is older than
+ * {@link IDLE_HEARTBEAT_MS}.
  *
  * Writes of one run are queued, so rows finishing together are written one
  * after the other and {@link finishRun} waits for every one of them. Resolves
@@ -317,11 +337,18 @@ export function recordRow(
     }
 
     run.rows += 1;
-    if (enrichmentRows.length === 0) return 0;
-
     const { connection } = run;
+    if (enrichmentRows.length === 0) {
+      if (Date.now() - run.touchedAt >= IDLE_HEARTBEAT_MS) {
+        await connection.query(TOUCH_RUN, [runId]);
+        run.touchedAt = Date.now();
+      }
+      return 0;
+    }
+
     await connection.query('START TRANSACTION');
     try {
+      await connection.query(TOUCH_RUN, [runId]);
       await connection.query(
         'INSERT INTO enrichments (id, run_id, contact_email, field, value, confidence, strategy) VALUES ?',
         [enrichmentRows]
@@ -337,6 +364,7 @@ export function recordRow(
       throw error;
     }
 
+    run.touchedAt = Date.now();
     run.enrichments += enrichmentRows.length;
     run.evidence += evidenceRows.length;
     return enrichmentRows.length;
@@ -346,11 +374,15 @@ export function recordRow(
   return write;
 }
 
+/** Marks a given-up run `failed`, stopped and last active now. */
+const FAIL_RUN =
+  "UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'";
+
 /**
  * Stop recording a run without committing it, after one of its writes failed:
- * mark its run row `failed` with `finished_at` on the branch, close its
- * connection and forget it. The branch and whatever reached its working set
- * are left for inspection; {@link sweepAbandonedRuns} later merges them into
+ * mark its run row `failed` with `finished_at` and `last_activity_at` on the
+ * branch, close its connection and forget it. The branch and whatever reached
+ * its working set are left for inspection; {@link sweepAbandonedRuns} later merges them into
  * `main` as the `failed` run they are.
  *
  * The status write is best effort. When it fails too (the connection that
@@ -364,7 +396,7 @@ export async function abandonRun(runId: string): Promise<void> {
   activeRuns.delete(runId);
   await run.writes;
   await run.connection
-    .query("UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running'", [
+    .query(FAIL_RUN, [
       'failed' satisfies FinishStatus,
       run.id,
     ])
@@ -514,7 +546,7 @@ export async function finishRun(runId: string, status: FinishStatus): Promise<st
     // After the writes, so the summary counts every row that landed.
     message = commitMessage(run, status);
     await run.connection.query(
-      'UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP WHERE id = ?',
+      'UPDATE enrichment_runs SET status = ?, finished_at = CURRENT_TIMESTAMP, last_activity_at = CURRENT_TIMESTAMP WHERE id = ?',
       [status, run.id]
     );
     const [committed] = await run.connection.query("CALL DOLT_COMMIT('-Am', ?, '--author', ?)", [message, author]);
@@ -572,14 +604,20 @@ interface BranchRunRow {
   plan_id: string | null;
   list_ref: string;
   status: string;
+  /** Seconds since `last_activity_at`; NULL on a run from before the column. */
+  since_activity: unknown;
   since_start: unknown;
   since_finish: unknown;
   since_commit: unknown;
 }
 
-/** Seconds since the latest of the writes in `row`: the smallest of its ages. */
+/**
+ * Seconds since the latest of the writes in `row`: the smallest of its ages.
+ * The heartbeat stands in for `started_at` (it is set at start and only moves
+ * on); a run from before the heartbeat existed falls back to `started_at`.
+ */
 function idleSeconds(row: BranchRunRow): number {
-  const ages = [row.since_start, row.since_finish, row.since_commit]
+  const ages = [row.since_activity ?? row.since_start, row.since_finish, row.since_commit]
     .map(numberOrNull)
     .filter((age): age is number => age !== null);
   return ages.length > 0 ? Math.min(...ages) : 0;
@@ -588,8 +626,8 @@ function idleSeconds(row: BranchRunRow): number {
 /**
  * Finish the runs that a dead process left on their branches.
  *
- * Every `run/<id>` branch with no recorded write for more than
- * `olderThanHours` is taken as abandoned. For each one:
+ * Every `run/<id>` branch idle for more than `olderThanHours` (see Idle
+ * time) is taken as abandoned. For each one:
  *
  * - When `main` already holds the run with a `commit_hash`, the merge landed
  *   and only the branch delete was lost, so the branch is deleted and nothing
@@ -604,27 +642,35 @@ function idleSeconds(row: BranchRunRow): number {
  *
  * ## Idle time
  *
- * Dolt keeps no timestamp for uncommitted working-set writes: `dolt_status`
- * and the `dolt_workspace_*` tables carry none, and `dolt_branches` only has
- * the branch head's `latest_commit_date`
- * (https://www.dolthub.com/docs/sql-reference/version-control/dolt-system-tables).
- * The last write the sweeper can see is therefore the latest of the run row's
- * `started_at`, its `finished_at` (set by {@link abandonRun} and
- * {@link finishRun}) and the branch's `latest_commit_date` (the run's commit,
- * once {@link finishRun} made it; before that, the `main` commit the branch
- * was cut from, which is older than `started_at`).
+ * A branch's idle time runs from the latest of three writes:
  *
- * Each is measured on its own clock. `started_at` and `finished_at` are
- * `CURRENT_TIMESTAMP` values in the session time zone, while Dolt 2.1.8
+ * - `last_activity_at`, the run's heartbeat: set by {@link startRun}, moved by
+ *   every {@link recordRow} (in the row's own transaction; at least once a
+ *   minute for rows with nothing to record), by {@link finishRun} and by
+ *   {@link abandonRun}. A process that is still running a run keeps this
+ *   minutes old at most, so a live run is never swept at a threshold of hours.
+ * - `finished_at`, set by {@link finishRun} and {@link abandonRun}.
+ * - the branch's `latest_commit_date`: the run's commit once {@link finishRun}
+ *   made it; before that, the `main` commit the branch was cut from.
+ *
+ * The heartbeat is needed because Dolt keeps no timestamp for uncommitted
+ * working-set writes: `dolt_status` and the `dolt_workspace_*` tables carry
+ * none, and `dolt_branches` only has the head's `latest_commit_date`
+ * (https://www.dolthub.com/docs/sql-reference/version-control/dolt-system-tables).
+ *
+ * A run recorded before `last_activity_at` existed has it NULL, or a branch
+ * cut before the migration has no such column; its idle time then runs from
+ * `started_at` instead, as it did before the heartbeat. Such a run could be
+ * swept while still going only if it was started by a process older than the
+ * migration and is still running past the threshold.
+ *
+ * Each signal is measured on its own clock. `last_activity_at`, `started_at`
+ * and `finished_at` are `CURRENT_TIMESTAMP` values in the server's session
+ * time zone and are compared with `CURRENT_TIMESTAMP`, while Dolt 2.1.8
  * reports `latest_commit_date` in UTC, so the commit is compared with
  * `UTC_TIMESTAMP()`. The ages are taken one by one rather than through
  * `GREATEST`, which on these mixed datetime columns makes Dolt 2.1.8's
  * `TIMESTAMPDIFF` return nonsense.
- *
- * Limit: {@link recordRow} leaves no timestamp, so a live run that started
- * more than `olderThanHours` ago looks idle even while it is still writing
- * rows, and would be swept mid-flight. Keep the threshold well above the
- * longest run.
  *
  * A branch with no run row (a crash between `DOLT_BRANCH` and the insert, or
  * a start still in progress) is left alone with a warning. A branch that fails
@@ -674,12 +720,17 @@ async function sweepBranch(
   let status: FinishStatus;
   let runCommit: string | null = null;
   const author = commitAuthor();
-  const swept = `abandoned run branch, no recorded write for ${olderThanHours}h`;
+  const swept = `abandoned run branch, idle for ${olderThanHours}h`;
   let message = '';
 
   try {
+    // A branch cut before the migration has no heartbeat column at all.
+    const [heartbeat] = await connection.query("SHOW COLUMNS FROM enrichment_runs LIKE 'last_activity_at'");
+    const sinceActivity =
+      (heartbeat as unknown[]).length > 0 ? 'TIMESTAMPDIFF(SECOND, r.last_activity_at, CURRENT_TIMESTAMP)' : 'NULL';
     const [found] = await connection.query(
       `SELECT r.id, r.plan_id, r.list_ref, r.status,
+         ${sinceActivity} AS since_activity,
          TIMESTAMPDIFF(SECOND, r.started_at, CURRENT_TIMESTAMP) AS since_start,
          TIMESTAMPDIFF(SECOND, r.finished_at, CURRENT_TIMESTAMP) AS since_finish,
          TIMESTAMPDIFF(SECOND, b.latest_commit_date, UTC_TIMESTAMP()) AS since_commit
