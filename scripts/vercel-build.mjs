@@ -19,8 +19,10 @@
  * the Marketplace integration's prefixed names count here too. Without a url
  * the build skips it with one line: the app then uses the local file
  * fallback, which Vercel's read-only disk rejects at runtime with a message
- * naming `TURSO_DATABASE_URL`. Two prefixed Turso pairs and no plain one fail
- * the build before `next build`, naming the variables.
+ * naming `TURSO_DATABASE_URL`. A partial Turso configuration (a lone token,
+ * half of a prefixed pair, or a mixed pair) and two prefixed pairs with no
+ * plain url both fail the build before `next build`, naming the variables,
+ * as a partial Dolt does.
  *
  * Dolt is optional (`doltConfigState()` in `lib/dolt-config.mjs`):
  *
@@ -60,7 +62,7 @@ import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { DOLT_REQUIRED_VARS, doltConfigState, doltMisconfiguredMessage } from '../lib/dolt-config.mjs';
-import { tursoAmbiguousMessage, tursoConfig } from '../lib/libsql-url.mjs';
+import { tursoConfig, tursoConfigMessage } from '../lib/libsql-url.mjs';
 
 const MIGRATE_SCRIPT = fileURLToPath(new URL('./db-migrate.mjs', import.meta.url));
 const LIBSQL_MIGRATE_SCRIPT = fileURLToPath(new URL('./libsql-migrate.mjs', import.meta.url));
@@ -71,17 +73,18 @@ const LIBSQL_MIGRATE_SCRIPT = fileURLToPath(new URL('./libsql-migrate.mjs', impo
  * `tursoConfig()`); then `VERCEL_ENV` decides as it does for Dolt, with
  * `LIBSQL_PREVIEW_MIGRATE=1` as the Preview opt-in.
  *
- * `fail` is set when the Turso variables are ambiguous: the build must stop.
+ * `fail` is set when the Turso variables are misconfigured or ambiguous: the
+ * build must stop, not skip.
  *
  * @param {Record<string, string | undefined>} env
  * @returns {{ migrate: boolean, fail?: boolean, reason: string }}
  */
 export function libsqlPlan(env) {
   const turso = tursoConfig(env);
-  if (turso.state === 'ambiguous') {
-    return { migrate: false, fail: true, reason: tursoAmbiguousMessage(turso) };
+  if (turso.state === 'misconfigured' || turso.state === 'ambiguous') {
+    return { migrate: false, fail: true, reason: tursoConfigMessage(turso) };
   }
-  if (turso.state === 'unset') {
+  if (turso.state === 'off') {
     return { migrate: false, reason: 'TURSO_DATABASE_URL is not set' };
   }
 

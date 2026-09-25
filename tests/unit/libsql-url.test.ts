@@ -16,7 +16,7 @@ const URL_B = 'libsql://b.turso.io';
 describe('tursoConfig', () => {
   it('reads the plain pair', () => {
     expect(tursoConfig({ TURSO_DATABASE_URL: URL_A, TURSO_AUTH_TOKEN: 'tok-a' })).toEqual({
-      state: 'set',
+      state: 'on',
       url: URL_A,
       authToken: 'tok-a',
       urlVar: 'TURSO_DATABASE_URL',
@@ -25,12 +25,12 @@ describe('tursoConfig', () => {
   });
 
   it('accepts the plain url without a token (a file or a local server)', () => {
-    expect(tursoConfig({ TURSO_DATABASE_URL: 'file:./x.db' })).toMatchObject({ state: 'set', url: 'file:./x.db', authToken: undefined });
+    expect(tursoConfig({ TURSO_DATABASE_URL: 'file:./x.db' })).toMatchObject({ state: 'on', url: 'file:./x.db', authToken: undefined });
   });
 
   it('reads a prefixed pair, the Marketplace integration connected with a custom prefix', () => {
     expect(tursoConfig({ FIRE_TURSO_DATABASE_URL: URL_B, FIRE_TURSO_AUTH_TOKEN: 'tok-b' })).toEqual({
-      state: 'set',
+      state: 'on',
       url: URL_B,
       authToken: 'tok-b',
       urlVar: 'FIRE_TURSO_DATABASE_URL',
@@ -38,7 +38,7 @@ describe('tursoConfig', () => {
     });
     // Vercel allows lower-case letters in a prefix.
     expect(tursoConfig({ fireenrich_TURSO_DATABASE_URL: URL_B, fireenrich_TURSO_AUTH_TOKEN: 'tok-b' })).toMatchObject({
-      state: 'set',
+      state: 'on',
       url: URL_B,
     });
   });
@@ -50,28 +50,41 @@ describe('tursoConfig', () => {
       FIRE_TURSO_AUTH_TOKEN: 'tok-b',
     });
 
-    expect(config).toMatchObject({ state: 'set', url: URL_A, authToken: undefined, urlVar: 'TURSO_DATABASE_URL' });
+    expect(config).toMatchObject({ state: 'on', url: URL_A, authToken: undefined, urlVar: 'TURSO_DATABASE_URL' });
   });
 
-  it('does not count a mixed pair', () => {
-    for (const env of [
+  it('reports a mixed or half pair as misconfigured, naming what is set and what is missing', () => {
+    const cases: [Record<string, string>, string[], string[]][] = [
       // A prefixed url with the plain token.
-      { FIRE_TURSO_DATABASE_URL: URL_B, TURSO_AUTH_TOKEN: 'tok-a' },
+      [{ FIRE_TURSO_DATABASE_URL: URL_B, TURSO_AUTH_TOKEN: 'tok-a' }, ['FIRE_TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'], ['FIRE_TURSO_AUTH_TOKEN', 'TURSO_DATABASE_URL']],
       // A url and a token under two different prefixes.
-      { A_TURSO_DATABASE_URL: URL_A, B_TURSO_AUTH_TOKEN: 'tok-b' },
+      [{ A_TURSO_DATABASE_URL: URL_A, B_TURSO_AUTH_TOKEN: 'tok-b' }, ['A_TURSO_DATABASE_URL', 'B_TURSO_AUTH_TOKEN'], ['A_TURSO_AUTH_TOKEN', 'B_TURSO_DATABASE_URL']],
       // A prefixed url alone.
-      { FIRE_TURSO_DATABASE_URL: URL_B },
+      [{ FIRE_TURSO_DATABASE_URL: URL_B }, ['FIRE_TURSO_DATABASE_URL'], ['FIRE_TURSO_AUTH_TOKEN']],
       // A prefixed token alone.
-      { FIRE_TURSO_AUTH_TOKEN: 'tok-b' },
-    ]) {
-      expect(tursoConfig(env)).toEqual({ state: 'unset' });
+      [{ FIRE_TURSO_AUTH_TOKEN: 'tok-b' }, ['FIRE_TURSO_AUTH_TOKEN'], ['FIRE_TURSO_DATABASE_URL']],
+      // The plain token alone.
+      [{ TURSO_AUTH_TOKEN: 'tok-a' }, ['TURSO_AUTH_TOKEN'], ['TURSO_DATABASE_URL']],
+    ];
+    for (const [env, set, missing] of cases) {
+      expect(tursoConfig(env)).toEqual({ state: 'misconfigured', set, missing });
     }
   });
 
+  it('reports off when no Turso variable is set', () => {
+    expect(tursoConfig({})).toEqual({ state: 'off' });
+    expect(tursoConfig({ SOMETHING_ELSE: 'x' })).toEqual({ state: 'off' });
+  });
+
   it('treats an empty or whitespace value as unset', () => {
-    expect(tursoConfig({ TURSO_DATABASE_URL: '', TURSO_AUTH_TOKEN: 'tok' })).toEqual({ state: 'unset' });
-    expect(tursoConfig({ TURSO_DATABASE_URL: '  ' })).toEqual({ state: 'unset' });
-    expect(tursoConfig({ FIRE_TURSO_DATABASE_URL: URL_B, FIRE_TURSO_AUTH_TOKEN: ' ' })).toEqual({ state: 'unset' });
+    expect(tursoConfig({ TURSO_DATABASE_URL: '', TURSO_AUTH_TOKEN: '' })).toEqual({ state: 'off' });
+    expect(tursoConfig({ TURSO_DATABASE_URL: '  ' })).toEqual({ state: 'off' });
+    expect(tursoConfig({ FIRE_TURSO_DATABASE_URL: ' ', FIRE_TURSO_AUTH_TOKEN: '' })).toEqual({ state: 'off' });
+    expect(tursoConfig({ TURSO_DATABASE_URL: '', TURSO_AUTH_TOKEN: 'tok' })).toMatchObject({ state: 'misconfigured' });
+    expect(tursoConfig({ FIRE_TURSO_DATABASE_URL: URL_B, FIRE_TURSO_AUTH_TOKEN: ' ' })).toMatchObject({
+      state: 'misconfigured',
+      missing: ['FIRE_TURSO_AUTH_TOKEN'],
+    });
     expect(tursoConfig({ TURSO_DATABASE_URL: URL_A, TURSO_AUTH_TOKEN: '' })).toMatchObject({ url: URL_A, authToken: undefined });
   });
 
@@ -93,11 +106,11 @@ describe('tursoConfig', () => {
       B_TURSO_DATABASE_URL: URL_B,
     });
 
-    expect(config).toMatchObject({ state: 'set', url: URL_A, authToken: 'tok-a' });
+    expect(config).toMatchObject({ state: 'on', url: URL_A, authToken: 'tok-a' });
   });
 
   it('does not treat the plain name as a prefix of itself', () => {
-    expect(tursoConfig({ _TURSO_DATABASE_URL: URL_B, _TURSO_AUTH_TOKEN: 'tok-b' })).toEqual({ state: 'unset' });
+    expect(tursoConfig({ _TURSO_DATABASE_URL: URL_B, _TURSO_AUTH_TOKEN: 'tok-b' })).toEqual({ state: 'off' });
   });
 });
 
@@ -107,6 +120,15 @@ describe('libsqlConnection', () => {
       url: URL_B,
       authToken: 'tok-b',
     });
+  });
+
+  it('throws on a partial pair, naming the variables and no value', () => {
+    const env = { FIRE_TURSO_DATABASE_URL: URL_B };
+
+    expect(() => libsqlConnection(env)).toThrow(
+      'Turso is misconfigured: FIRE_TURSO_DATABASE_URL is set but FIRE_TURSO_AUTH_TOKEN is missing.'
+    );
+    expect(() => libsqlConnection(env)).not.toThrow(URL_B);
   });
 
   it('throws on ambiguous variables, naming them and no value', () => {

@@ -25,6 +25,7 @@ export async function GET() {
   // and no key is set; `gatewayConfigured` counts either credential, reading
   // the token the way the gateway does (request context, then environment).
   const gateway = gatewayConfigured();
+  const turso = tursoConfig();
   const environmentStatus = {
     FIRECRAWL_API_KEY: !!process.env.FIRECRAWL_API_KEY,
     AI_GATEWAY_API_KEY: gateway,
@@ -32,8 +33,18 @@ export async function GET() {
     // UI is repackaged.
     OPENAI_API_KEY: gateway,
     // True for either naming `lib/libsql-url.mjs` accepts: TURSO_DATABASE_URL,
-    // or the Marketplace integration's <PREFIX>_TURSO_* pair.
-    TURSO_DATABASE_URL: tursoConfig().state === 'set',
+    // or the Marketplace integration's <PREFIX>_TURSO_* pair. A partial or
+    // ambiguous configuration is false here and detailed under `turso`.
+    TURSO_DATABASE_URL: turso.state === 'on',
+  };
+  // How the Turso variables stand, names only. `misconfigured` is a partial
+  // pair (a lone token, half of a prefixed pair, or a mixed pair); `ambiguous`
+  // is two complete prefixed pairs and no plain url. Both are mistakes to fix.
+  const database = {
+    configured: turso.state === 'on',
+    misconfigured: turso.state === 'misconfigured' || turso.state === 'ambiguous',
+    set: turso.state === 'misconfigured' ? turso.set : turso.state === 'ambiguous' ? turso.urlVars : [],
+    missing: turso.state === 'misconfigured' ? turso.missing : [],
   };
   const dolt = doltConfigState();
   const optional = {
@@ -47,5 +58,5 @@ export async function GET() {
     },
   };
 
-  return NextResponse.json({ environmentStatus, optional });
+  return NextResponse.json({ environmentStatus, turso: database, optional });
 }

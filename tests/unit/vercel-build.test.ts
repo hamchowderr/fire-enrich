@@ -117,10 +117,21 @@ describe('libsqlPlan', () => {
     expect(libsqlPlan(env)).toEqual({ migrate: true, reason: 'production build' });
   });
 
-  it('skips a mixed pair as unset', () => {
-    const plan = libsqlPlan({ VERCEL_ENV: 'production', FIRE_TURSO_DATABASE_URL: 'libsql://db.example', TURSO_AUTH_TOKEN: 'tok' });
+  it('fails on a mixed or half pair, naming the variables set and missing and no value', () => {
+    const mixed = libsqlPlan({ VERCEL_ENV: 'production', FIRE_TURSO_DATABASE_URL: 'libsql://db.example', TURSO_AUTH_TOKEN: 'tok' });
 
-    expect(plan).toEqual({ migrate: false, reason: 'TURSO_DATABASE_URL is not set' });
+    expect(mixed).toEqual({
+      migrate: false,
+      fail: true,
+      reason:
+        'Turso is misconfigured: FIRE_TURSO_DATABASE_URL, TURSO_AUTH_TOKEN are set but FIRE_TURSO_AUTH_TOKEN, ' +
+        'TURSO_DATABASE_URL are missing. Set TURSO_DATABASE_URL (and TURSO_AUTH_TOKEN), or both halves of one <PREFIX>_TURSO_* pair.',
+    });
+
+    const half = libsqlPlan({ VERCEL_ENV: 'preview', FIRE_TURSO_DATABASE_URL: 'libsql://db.example' });
+    expect(half.fail).toBe(true);
+    expect(half.reason).toContain('FIRE_TURSO_DATABASE_URL is set but FIRE_TURSO_AUTH_TOKEN is missing');
+    expect(half.reason).not.toContain('db.example');
   });
 
   it('fails on two prefixed pairs and no plain url', () => {
@@ -214,6 +225,17 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
     expect(result.stdout).toContain('db:migrate:libsql: production build.');
     expect(result.stdout).toContain('prefixed.db: ');
     expect(result.stdout).toContain('table:profiles');
+  });
+
+  it('fails before building on half a prefixed Turso pair, naming the variables and no value', () => {
+    const result = build({ VERCEL_ENV: 'production', FIRE_TURSO_DATABASE_URL: `file:${join(dir, 'half.db')}` });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain(BUILT);
+    expect(result.stderr).toContain(
+      'db:migrate:libsql: Turso is misconfigured: FIRE_TURSO_DATABASE_URL is set but FIRE_TURSO_AUTH_TOKEN is missing.'
+    );
+    expect(result.stderr).not.toContain('half.db');
   });
 
   it('fails before building when two prefixed Turso pairs are set and no plain one', () => {

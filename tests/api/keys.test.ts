@@ -395,16 +395,25 @@ describe('GET /api/check-env', () => {
     });
   });
 
-  it('counts the Turso pair the Marketplace integration sets under a custom prefix, and not half of it', async () => {
+  it('counts the Turso pair the Marketplace integration sets under a custom prefix, and reports half of it as misconfigured', async () => {
     for (const key of ENV) delete process.env[key];
     process.env.FIRE_TURSO_DATABASE_URL = 'libsql://prefixed-secret.turso.io';
 
-    expect((await (await checkEnv()).json()).environmentStatus.TURSO_DATABASE_URL).toBe(false);
+    const half = await (await checkEnv()).json();
+    expect(half.environmentStatus.TURSO_DATABASE_URL).toBe(false);
+    expect(half.turso).toEqual({
+      configured: false,
+      misconfigured: true,
+      set: ['FIRE_TURSO_DATABASE_URL'],
+      missing: ['FIRE_TURSO_AUTH_TOKEN'],
+    });
+    expect(JSON.stringify(half)).not.toContain('prefixed-secret.turso.io');
 
     process.env.FIRE_TURSO_AUTH_TOKEN = 'prefixed-secret-token';
     const body = await (await checkEnv()).json();
 
     expect(body.environmentStatus.TURSO_DATABASE_URL).toBe(true);
+    expect(body.turso).toEqual({ configured: true, misconfigured: false, set: [], missing: [] });
     const text = JSON.stringify(body);
     for (const secret of ['prefixed-secret.turso.io', 'prefixed-secret-token']) expect(text).not.toContain(secret);
   });
