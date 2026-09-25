@@ -137,13 +137,14 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
 
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  function build(extra: Record<string, string>) {
+  function build(extra: Record<string, string>, cwd?: string) {
     const env: NodeJS.ProcessEnv = { ...process.env };
     for (const key of [...DOLT_ENV, ...TURSO_ENV]) delete env[key];
     // Windows env names are case-insensitive, and the parent's copy may be
     // spelled differently; drop every spelling so the stub is the only one.
     for (const key of Object.keys(env)) if (key.toLowerCase() === 'npm_execpath') delete env[key];
     return spawnSync(process.execPath, [SCRIPT], {
+      cwd,
       encoding: 'utf8',
       env: { ...env, npm_execpath: stub, ...extra },
       timeout: 20_000,
@@ -206,6 +207,28 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
     expect(result.stdout).toContain('db:migrate: production build.');
     expect(result.stderr).toContain('Migration failed against 127.0.0.1:1/fire_enrich');
     expect(result.status).toBe(1);
+  });
+
+  it('ignores .env and .env.local in its working directory: only the platform variables decide', () => {
+    // A local `vercel build` runs where a developer's env files are. The
+    // migrations run with plain `node`, so those files never reach them.
+    const cwd = mkdtempSync(join(dir, 'with-env-files-'));
+    const local = [
+      'DOLT_HOST=127.0.0.1',
+      'DOLT_PORT=1',
+      'DOLT_DATABASE=from_env_local',
+      `TURSO_DATABASE_URL=file:${join(cwd, 'from-env-local.db').replace(/\\/g, '/')}`,
+    ].join('\n');
+    writeFileSync(join(cwd, '.env.local'), `${local}\n`);
+    writeFileSync(join(cwd, '.env'), `${local}\n`);
+
+    const result = build({ VERCEL_ENV: 'production' }, cwd);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(BUILT);
+    expect(result.stdout).toContain('db:migrate skipped: Dolt is not configured (optional;');
+    expect(result.stdout).toContain('db:migrate:libsql skipped: TURSO_DATABASE_URL is not set.');
+    expect(`${result.stdout}${result.stderr}`).not.toContain('from_env_local');
   });
 
   it('fails before building on a partial Dolt, naming the missing variable', () => {

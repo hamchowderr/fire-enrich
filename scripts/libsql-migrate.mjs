@@ -6,6 +6,9 @@
  *   TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... npm run db:migrate:libsql
  *   npm run db:migrate:libsql          # no TURSO_*: the local .mastra/fire-enrich.db
  *
+ * The npm script reads `.env` and `.env.local` (`--env-file-if-exists` in
+ * package.json); a variable already set in the environment wins over both.
+ *
  * The database is the one Mastra's store uses (`lib/libsql-url.mjs`): Turso
  * when `TURSO_DATABASE_URL` is set, the local file otherwise. Every statement
  * is `IF NOT EXISTS` and they run as one write batch, one transaction, so a

@@ -65,13 +65,13 @@ first. Leave `DOLT_TLS_CA_B64` unset, because the local server has no TLS.
 ### 3. Apply the schema
 
 ```sh
-node --env-file=.env.local scripts/db-migrate.mjs
+npm run db:migrate
 ```
 
-This is `npm run db:migrate` with `.env.local` loaded. The script reads only
-the process environment, so `npm run db:migrate` alone does not see
-`.env.local`. Instead, you can export the five `DOLT_*` variables in your
-shell and run `npm run db:migrate`.
+The npm script reads `.env` and `.env.local`, as the app does. A value in
+`.env.local` wins over `.env`, and a variable already set in your shell wins
+over both. When neither file exists, Node prints one `not found. Continuing
+without it.` line per file and the script uses the shell's variables.
 
 The first run prints `3 tables changed` and a commit hash. A second run prints
 `nothing changed — no commit`. The three tables are the run tables
@@ -253,6 +253,9 @@ DOLT_PASSWORD=... DOLT_DATABASE=fire_enrich \
 DOLT_TLS_CA_B64="$(base64 -w0 deploy/dolt/certs/server.crt)" \
 npm run db:migrate
 ```
+
+Variables set on the command line win over `.env` and `.env.local`. A variable
+left out is read from those files if they set it, so set all six.
 
 ### Renewing the certificate
 

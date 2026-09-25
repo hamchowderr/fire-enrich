@@ -5,6 +5,10 @@
  *   DOLT_HOST=127.0.0.1 DOLT_PORT=3306 DOLT_USER=root DOLT_PASSWORD= \
  *   DOLT_DATABASE=fire_enrich npm run db:migrate
  *
+ * The npm script reads `.env` and `.env.local` (`--env-file-if-exists` in
+ * package.json), so with the DOLT_* variables in `.env.local` a plain
+ * `npm run db:migrate` works; a variable already set in the environment wins.
+ *
  * Three steps, in order:
  *
  *   1. `CREATE DATABASE` on a connection with no database selected, only

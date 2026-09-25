@@ -152,6 +152,10 @@ function main() {
   if (npm) run(process.execPath, [npm, 'run', 'build']);
   else run('npm', ['run', 'build']);
 
+  // The migration scripts run with plain `node`, not through their npm
+  // scripts, which read `.env` and `.env.local`: a build reads only
+  // the platform's variables, never a local env file.
+  //
   // Before Dolt: profiles and plans are needed by every deployment, run
   // history only by those with Dolt. A failure exits here, failing the build.
   const libsql = libsqlPlan(process.env);
