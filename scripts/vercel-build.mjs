@@ -8,10 +8,14 @@
  * Vercel runs this instead of `npm run build`. Locally `npm run build` is still
  * plain `next build` and needs no database.
  *
- * Dolt is optional. With no Dolt configured (`isDoltConfigured()` in
- * `lib/dolt-config.mjs`: `DOLT_HOST` and `DOLT_DATABASE` unset) the build logs
- * one line and skips the migration, on every environment, and still succeeds:
- * a one-click deploy with only the required services builds cleanly.
+ * Dolt is optional (`doltConfigState()` in `lib/dolt-config.mjs`):
+ *
+ * - No `DOLT_*` connection variable set: the build logs one line and skips
+ *   the migration, on every environment, and succeeds. A one-click deploy
+ *   with only the required services builds cleanly.
+ * - Some set but `DOLT_HOST` or `DOLT_DATABASE` missing: a misconfiguration.
+ *   The build fails before `next build`, naming the missing variables, rather
+ *   than deploying with run history silently off.
  *
  * With Dolt configured, which builds migrate is decided by {@link migrationPlan}
  * from `VERCEL_ENV`, which Vercel sets at build time to `production`,
@@ -41,20 +45,26 @@ import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { DOLT_REQUIRED_VARS, isDoltConfigured } from '../lib/dolt-config.mjs';
+import { DOLT_REQUIRED_VARS, doltConfigState, doltMisconfiguredMessage } from '../lib/dolt-config.mjs';
 
 const MIGRATE_SCRIPT = fileURLToPath(new URL('./db-migrate.mjs', import.meta.url));
 
 /**
  * Decide whether this build applies migrations.
  *
+ * `fail` is set for a misconfigured Dolt: the build must stop, not skip.
+ *
  * @param {Record<string, string | undefined>} env
- * @returns {{ migrate: boolean, reason: string }}
+ * @returns {{ migrate: boolean, fail?: boolean, reason: string }}
  */
 export function migrationPlan(env) {
-  // Checked first: without Dolt there is nothing to migrate on any
-  // environment, and that is a supported mode, not a misconfiguration.
-  if (!isDoltConfigured(env)) {
+  // Checked first, on every environment: without Dolt there is nothing to
+  // migrate, and that is a supported mode; a partial Dolt is an error.
+  const config = doltConfigState(env);
+  if (config.state === 'misconfigured') {
+    return { migrate: false, fail: true, reason: doltMisconfiguredMessage(config) };
+  }
+  if (config.state === 'off') {
     return {
       migrate: false,
       reason: `Dolt is not configured (optional; set ${DOLT_REQUIRED_VARS.join(' and ')} to enable it)`,
@@ -87,13 +97,19 @@ function run(command, args) {
 }
 
 function main() {
+  // Decided before the build, so a misconfigured Dolt fails in seconds.
+  const plan = migrationPlan(process.env);
+  if (plan.fail) {
+    console.error(`db:migrate: ${plan.reason}`);
+    process.exit(1);
+  }
+
   // The npm that started this script (`npm run build:vercel` sets
   // npm_execpath), run by this Node, so no shell is needed on any platform.
   const npm = process.env.npm_execpath;
   if (npm) run(process.execPath, [npm, 'run', 'build']);
   else run('npm', ['run', 'build']);
 
-  const plan = migrationPlan(process.env);
   if (!plan.migrate) {
     console.log(`db:migrate skipped: ${plan.reason}.`);
     return;

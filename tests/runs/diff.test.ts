@@ -280,7 +280,8 @@ describe('previousRunFor', () => {
 
 describe('GET /api/runs/:id/diff', () => {
   it('answers 501 "requires Dolt" when Dolt is not configured, without touching the database', async () => {
-    delete process.env.DOLT_HOST;
+    // No DOLT_* at all (afterEach restores the originals).
+    isolateDoltEnv();
 
     const { status, body } = await getDiff('run_b');
 
@@ -298,12 +299,15 @@ describe('GET /api/runs/:id/diff', () => {
     expect(fake.log).toEqual([]);
   });
 
-  it('treats a missing DOLT_DATABASE as not configured too', async () => {
+  it('answers 503 "misconfigured" for a partial Dolt, naming the missing variable', async () => {
+    // configureDolt set host, port, user and password; the database is gone.
     delete process.env.DOLT_DATABASE;
 
-    const { status } = await getDiff('run_b');
+    const { status, body } = await getDiff('run_b');
 
-    expect(status).toBe(501);
+    expect(status).toBe(503);
+    expect(body).toMatchObject({ code: 'dolt_misconfigured', feature: 'Run diffs', missing: ['DOLT_DATABASE'] });
+    expect(body.error).toContain('DOLT_DATABASE is missing');
     expect(fake.log).toEqual([]);
   });
 

@@ -19,10 +19,11 @@
  * any branch failed, after sweeping the rest, or Dolt is unreachable; 2 on a
  * usage error.
  *
- * Dolt is optional. With it not configured (`DOLT_HOST` and `DOLT_DATABASE`
- * unset) no run was ever recorded, so there is nothing to sweep: the script
- * prints one "requires Dolt" line and exits 0, so a scheduled sweep on a
- * deployment without Dolt is a no-op rather than a failure.
+ * Dolt is optional. With no `DOLT_*` connection variable set no run was ever
+ * recorded, so there is nothing to sweep: the script prints one "requires
+ * Dolt" line and exits 0, so a scheduled sweep on a deployment without Dolt is
+ * a no-op rather than a failure. With some set but `DOLT_HOST` or
+ * `DOLT_DATABASE` missing, it names what is missing and exits 1.
  *
  * `lib/runs.ts` is TypeScript, which Node 24 loads by stripping its types. The
  * resolve hook below maps the app's `@/` path alias (tsconfig.json) to the
@@ -78,12 +79,17 @@ registerHooks({
 });
 
 const { DEFAULT_SWEEP_HOURS, sweepAbandonedRuns } = await import('../lib/runs.ts');
-const { DOLT_REQUIRED_VARS, isDoltConfigured } = await import('../lib/dolt-config.mjs');
+const { DOLT_REQUIRED_VARS, doltConfigState, doltMisconfiguredMessage } = await import('../lib/dolt-config.mjs');
 
 const olderThanHours = hoursFlag === undefined ? DEFAULT_SWEEP_HOURS : Number(hoursFlag);
 const dryRun = values['dry-run'];
 
-if (!isDoltConfigured()) {
+const doltConfig = doltConfigState();
+if (doltConfig.state === 'misconfigured') {
+  console.error(doltMisconfiguredMessage(doltConfig));
+  process.exit(1);
+}
+if (doltConfig.state === 'off') {
   console.log(
     `db:sweep-runs requires Dolt, which is not configured (optional; set ${DOLT_REQUIRED_VARS.join(' and ')} to enable it). No runs are recorded without it, so there is nothing to sweep.`
   );

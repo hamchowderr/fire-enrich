@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { isDoltConfigured } from '@/lib/dolt';
+import { doltConfigState } from '@/lib/dolt-config.mjs';
 import { gatewayConfigured } from '@/lib/gateway-auth';
 
 /**
@@ -12,6 +12,12 @@ import { gatewayConfigured } from '@/lib/gateway-auth';
  * it is optional, and an unset Dolt is not a missing setting. It is reported
  * under `optional.dolt` instead, with what it switches on, so a deployment
  * without it reads as "optional, not configured" rather than as a failure.
+ * A partial Dolt (some `DOLT_*` set, `DOLT_HOST` or `DOLT_DATABASE` missing)
+ * is reported as `misconfigured`, with the missing names: that one is a
+ * mistake to fix, not a choice.
+ *
+ * Imports the config module, not `lib/dolt`, so this route never loads the
+ * MySQL driver.
  */
 export async function GET() {
   // On Vercel the AI Gateway authenticates with the deployment's OIDC token
@@ -26,10 +32,14 @@ export async function GET() {
     OPENAI_API_KEY: gateway,
     TURSO_DATABASE_URL: !!process.env.TURSO_DATABASE_URL,
   };
+  const dolt = doltConfigState();
   const optional = {
     dolt: {
       required: false,
-      configured: isDoltConfigured(),
+      configured: dolt.state === 'on',
+      misconfigured: dolt.state === 'misconfigured',
+      // Variable names only, never values.
+      missing: dolt.state === 'misconfigured' ? dolt.missing : [],
       enables: ['versioned run history', 'run diffs'],
     },
   };

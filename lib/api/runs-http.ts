@@ -12,7 +12,7 @@
 import { NextResponse } from 'next/server';
 
 import { isDoltConfigured } from '@/lib/dolt';
-import { DOLT_REQUIRED_VARS } from '@/lib/dolt-config.mjs';
+import { DOLT_REQUIRED_VARS, doltConfigState, doltMisconfiguredMessage } from '@/lib/dolt-config.mjs';
 
 /**
  * The "requires Dolt" answer when Dolt is not configured, `null` when it is.
@@ -28,9 +28,27 @@ import { DOLT_REQUIRED_VARS } from '@/lib/dolt-config.mjs';
  * `requires` let a client show an "enable Dolt" state instead of an error.
  * The UI does not reach it: without Dolt no run is committed, `complete`
  * carries `runId: null`, and the table asks for no diff.
+ *
+ * A misconfigured Dolt (some `DOLT_*` set, a required one missing) is a
+ * mistake, not a choice, so it answers 503 with `code: 'dolt_misconfigured'`
+ * and the missing variable names instead.
  */
 export function requireRunHistory(feature = 'Run history'): NextResponse | null {
   if (isDoltConfigured()) return null;
+
+  const config = doltConfigState();
+  if (config.state === 'misconfigured') {
+    return NextResponse.json(
+      {
+        error: `${feature} is unavailable. ${doltMisconfiguredMessage(config)}`,
+        code: 'dolt_misconfigured',
+        feature,
+        requires: 'dolt',
+        missing: config.missing,
+      },
+      { status: 503 }
+    );
+  }
 
   return NextResponse.json(
     {

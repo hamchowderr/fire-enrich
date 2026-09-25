@@ -99,7 +99,7 @@ const CHAT_BODY = {
 
 const SCRAPE_BODY = { url: 'https://firecrawl.dev' };
 
-const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN', 'TURSO_DATABASE_URL', 'DOLT_HOST', 'DOLT_DATABASE'] as const;
+const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN', 'TURSO_DATABASE_URL', 'DOLT_HOST', 'DOLT_DATABASE', 'DOLT_PASSWORD'] as const;
 const saved: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
 
 /** The global `@vercel/oidc` reads the request context from (see its `get-context.js`). */
@@ -335,6 +335,8 @@ describe('GET /api/check-env', () => {
     expect(body.optional.dolt).toEqual({
       required: false,
       configured: true,
+      misconfigured: false,
+      missing: [],
       enables: ['versioned run history', 'run diffs'],
     });
 
@@ -385,13 +387,38 @@ describe('GET /api/check-env', () => {
 
   it('reports Dolt as optional and not configured, outside the required settings', async () => {
     for (const key of ENV) delete process.env[key];
-    // DOLT_HOST alone is not a configured Dolt: DOLT_DATABASE is required too.
-    process.env.DOLT_HOST = 'dolt.internal';
 
     const body = await (await checkEnv()).json();
 
     expect(body.environmentStatus).not.toHaveProperty('DOLT_HOST');
-    expect(body.optional.dolt).toMatchObject({ required: false, configured: false });
+    expect(body.optional.dolt).toEqual({
+      required: false,
+      configured: false,
+      misconfigured: false,
+      missing: [],
+      enables: ['versioned run history', 'run diffs'],
+    });
+  });
+
+  it('reports a partial Dolt as misconfigured, naming the missing variables and no values', async () => {
+    for (const key of ENV) delete process.env[key];
+    process.env.DOLT_HOST = 'dolt.internal';
+    process.env.DOLT_PASSWORD = 'dolt-secret-password';
+
+    const body = await (await checkEnv()).json();
+
+    expect(body.optional.dolt).toMatchObject({ configured: false, misconfigured: true, missing: ['DOLT_DATABASE'] });
+    expect(JSON.stringify(body)).not.toMatch(/dolt\.internal|dolt-secret-password/);
+  });
+
+  it('counts a whitespace-only DOLT_DATABASE as missing', async () => {
+    for (const key of ENV) delete process.env[key];
+    process.env.DOLT_HOST = 'dolt.internal';
+    process.env.DOLT_DATABASE = '   ';
+
+    const body = await (await checkEnv()).json();
+
+    expect(body.optional.dolt).toMatchObject({ configured: false, misconfigured: true, missing: ['DOLT_DATABASE'] });
   });
 });
 

@@ -86,6 +86,27 @@ describe('RunRecording without Dolt (optional, not configured)', () => {
   });
 });
 
+describe('RunRecording with a partial Dolt (misconfigured)', () => {
+  it('warns in the log naming the missing variable, shows the stream warning once, and touches no database', async () => {
+    process.env.DOLT_HOST = '127.0.0.1';
+    process.env.DOLT_PASSWORD = 'secret-pw-value';
+
+    const { recording, warnings } = await start();
+    await recording.recordRow(0, 'a@a.example', { headline: ENRICHMENT }, {});
+    await recording.recordRow(1, 'b@b.example', { headline: ENRICHMENT }, {});
+    await expect(recording.finish('completed')).resolves.toBeNull();
+
+    expect(warnLog).toHaveBeenCalledTimes(1);
+    expect(warnLog).toHaveBeenCalledWith(
+      expect.stringContaining('[RUNS] run not recorded: Dolt is misconfigured: DOLT_HOST, DOLT_PASSWORD are set but DOLT_DATABASE is missing')
+    );
+    expect(warnLog.mock.calls.flat().join('\n')).not.toContain('secret-pw-value');
+    expect(warnings).toEqual([{ rowIndex: 0, message: 'run not recorded: storage unavailable', messageType: 'warning' }]);
+    expect(createPool).not.toHaveBeenCalled();
+    expect(createConnection).not.toHaveBeenCalled();
+  });
+});
+
 describe('RunRecording with Dolt down', () => {
   it('reports the connection failure once, without its detail, and keeps going', async () => {
     configureDolt();

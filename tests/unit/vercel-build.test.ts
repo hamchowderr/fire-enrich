@@ -1,4 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { migrationPlan } from '@/scripts/vercel-build.mjs';
 
@@ -10,29 +16,41 @@ describe('migrationPlan', () => {
     expect(migrationPlan({ VERCEL_ENV: 'production', ...DOLT }).migrate).toBe(true);
   });
 
-  it('skips a production build with no Dolt database', () => {
-    const plan = migrationPlan({ VERCEL_ENV: 'production', DOLT_HOST: 'dolt.example' });
-
-    expect(plan.migrate).toBe(false);
-    expect(plan.reason).toContain('DOLT_DATABASE');
-  });
-
   it('skips every build with no DOLT_* at all, and says Dolt is optional', () => {
     for (const env of [
       { VERCEL_ENV: 'production' },
       { VERCEL_ENV: 'preview', DOLT_PREVIEW_MIGRATE: '1' },
       { VERCEL_ENV: 'development' },
       {},
+      // Tuning variables alone do not mean Dolt was meant to be on.
+      { VERCEL_ENV: 'production', DOLT_COMMIT_AUTHOR: 'A <a@example.com>' },
+      // Whitespace-only values count as unset.
+      { VERCEL_ENV: 'production', DOLT_HOST: '  ', DOLT_DATABASE: '\t' },
     ]) {
       const plan = migrationPlan(env);
       expect(plan.migrate).toBe(false);
+      expect(plan.fail).toBeUndefined();
       expect(plan.reason).toBe('Dolt is not configured (optional; set DOLT_HOST and DOLT_DATABASE to enable it)');
     }
   });
 
-  it('counts an empty DOLT_HOST or DOLT_DATABASE as not configured', () => {
-    expect(migrationPlan({ VERCEL_ENV: 'production', DOLT_HOST: '', DOLT_DATABASE: 'fire_enrich' }).migrate).toBe(false);
-    expect(migrationPlan({ VERCEL_ENV: 'production', DOLT_HOST: 'dolt.example', DOLT_DATABASE: '' }).migrate).toBe(false);
+  it.each([
+    ['DOLT_HOST only', { DOLT_HOST: 'dolt.example' }, ['DOLT_DATABASE']],
+    ['DOLT_DATABASE only', { DOLT_DATABASE: 'fire_enrich' }, ['DOLT_HOST']],
+    ['DOLT_HOST and DOLT_PASSWORD, no DOLT_DATABASE', { DOLT_HOST: 'dolt.example', DOLT_PASSWORD: 'pw' }, ['DOLT_DATABASE']],
+    ['DOLT_USER and DOLT_PORT only', { DOLT_USER: 'app', DOLT_PORT: '3306' }, ['DOLT_HOST', 'DOLT_DATABASE']],
+    ['DOLT_TLS_CA_B64 only', { DOLT_TLS_CA_B64: 'Zm9v' }, ['DOLT_HOST', 'DOLT_DATABASE']],
+    ['a whitespace-only DOLT_HOST', { DOLT_HOST: '   ', DOLT_DATABASE: 'fire_enrich' }, ['DOLT_HOST']],
+    ['a whitespace-only DOLT_DATABASE', { DOLT_HOST: 'dolt.example', DOLT_DATABASE: ' ' }, ['DOLT_DATABASE']],
+  ])('fails every build with a partial Dolt: %s', (_label, dolt, missing) => {
+    for (const target of ['production', 'preview', 'development', undefined]) {
+      const plan = migrationPlan({ VERCEL_ENV: target, ...dolt });
+
+      expect(plan.migrate).toBe(false);
+      expect(plan.fail).toBe(true);
+      expect(plan.reason).toMatch(/^Dolt is misconfigured: /);
+      expect(plan.reason).toContain(`${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} missing`);
+    }
   });
 
   it('never migrates a preview build by default, even with Dolt configured', () => {
@@ -55,5 +73,67 @@ describe('migrationPlan', () => {
   it('never migrates a local or development build', () => {
     expect(migrationPlan({ ...DOLT }).migrate).toBe(false);
     expect(migrationPlan({ VERCEL_ENV: 'development', ...DOLT }).migrate).toBe(false);
+  });
+});
+
+/**
+ * The script end to end, as Vercel runs it, in a child process. `next build`
+ * is replaced by a stub: the script runs `npm_execpath run build` with this
+ * Node, so pointing `npm_execpath` at a file that prints a marker and exits 0
+ * stands in for a build that succeeded. The migration is the real
+ * `scripts/db-migrate.mjs`.
+ */
+describe('vercel-build main()', { timeout: 30_000 }, () => {
+  const SCRIPT = fileURLToPath(new URL('../../scripts/vercel-build.mjs', import.meta.url));
+  const BUILT = 'stub next build ran';
+  const DOLT_ENV = ['DOLT_HOST', 'DOLT_PORT', 'DOLT_USER', 'DOLT_PASSWORD', 'DOLT_DATABASE', 'DOLT_TLS_CA_B64', 'DOLT_PREVIEW_MIGRATE'];
+  let dir: string;
+  let stub: string;
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'vercel-build-'));
+    stub = join(dir, 'npm-stub.mjs');
+    writeFileSync(stub, `console.log(${JSON.stringify(BUILT)});\n`);
+  });
+
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  function build(extra: Record<string, string>) {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const key of DOLT_ENV) delete env[key];
+    // Windows env names are case-insensitive, and the parent's copy may be
+    // spelled differently; drop every spelling so the stub is the only one.
+    for (const key of Object.keys(env)) if (key.toLowerCase() === 'npm_execpath') delete env[key];
+    return spawnSync(process.execPath, [SCRIPT], {
+      encoding: 'utf8',
+      env: { ...env, npm_execpath: stub, ...extra },
+      timeout: 20_000,
+    });
+  }
+
+  it('builds, skips the migration, and exits 0 with no Dolt configured', () => {
+    const result = build({ VERCEL_ENV: 'production' });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(BUILT);
+    expect(result.stdout).toContain('db:migrate skipped: Dolt is not configured (optional;');
+  });
+
+  it('exits non-zero when Dolt is configured and the migration fails', () => {
+    // Port 1 on loopback: nothing listens, the connection is refused at once.
+    const result = build({ VERCEL_ENV: 'production', DOLT_HOST: '127.0.0.1', DOLT_PORT: '1', DOLT_DATABASE: 'fire_enrich' });
+
+    expect(result.stdout).toContain(BUILT);
+    expect(result.stdout).toContain('db:migrate: production build.');
+    expect(result.stderr).toContain('Migration failed against 127.0.0.1:1/fire_enrich');
+    expect(result.status).toBe(1);
+  });
+
+  it('fails before building on a partial Dolt, naming the missing variable', () => {
+    const result = build({ VERCEL_ENV: 'production', DOLT_HOST: '127.0.0.1', DOLT_PASSWORD: 'pw' });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain(BUILT);
+    expect(result.stderr).toContain('Dolt is misconfigured: DOLT_HOST, DOLT_PASSWORD are set but DOLT_DATABASE is missing');
   });
 });

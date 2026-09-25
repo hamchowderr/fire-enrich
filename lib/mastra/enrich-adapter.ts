@@ -32,6 +32,7 @@
  * and neither do evidence urls, which would make the check circular.
  */
 import { isDoltConfigured } from '@/lib/dolt';
+import { doltAccessDeniedHint, doltConfigState, doltMisconfiguredMessage } from '@/lib/dolt-config.mjs';
 import { abandonRun, finishRun, recordRow, startRun, type FieldStrategies, type FinishStatus } from '@/lib/runs';
 import type { CSVRow, EnrichmentResult, RowEnrichmentResult } from '@/lib/types';
 
@@ -338,6 +339,10 @@ let loggedDoltOff = false;
  * - Dolt not configured: {@link RunRecording.disabled}. Dolt is optional, so
  *   this is a supported mode, not a failure: one info line per process, no
  *   per-run warning.
+ * - Dolt misconfigured (some `DOLT_*` set, a required one missing): treated
+ *   like Dolt down, since it is a mistake rather than a choice. A warning
+ *   naming the missing variables is logged, and the stream shows the generic
+ *   warning on the first row.
  * - Dolt configured but unreachable: an inert recording that logs why and
  *   shows the generic warning on the first row.
  *
@@ -354,6 +359,11 @@ export async function startRunRecording({
   warn: (rowIndex: number, line: ProgressLine) => void;
 }): Promise<RunRecording> {
   if (!isDoltConfigured()) {
+    const config = doltConfigState();
+    if (config.state === 'misconfigured') {
+      console.warn(`[RUNS] run not recorded: ${doltMisconfiguredMessage(config)}`);
+      return new RunRecording(null, true, warn);
+    }
     if (!loggedDoltOff) {
       loggedDoltOff = true;
       console.info('[RUNS] Dolt is not configured (optional): enrichment runs are not recorded.');
@@ -364,7 +374,9 @@ export async function startRunRecording({
     const runId = await startRun({ planId: planId ?? null, listRef });
     return new RunRecording(runId, false, warn);
   } catch (error) {
-    console.warn(`[RUNS] run not recorded: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(
+      `[RUNS] run not recorded: ${error instanceof Error ? error.message : String(error)}${doltAccessDeniedHint(error)}`
+    );
     return new RunRecording(null, true, warn);
   }
 }

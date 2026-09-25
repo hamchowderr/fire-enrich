@@ -26,6 +26,13 @@ describe('db-migrate script', { timeout: 30_000 }, () => {
     expect(result.stderr).toContain('Dolt is not configured: set DOLT_HOST and DOLT_DATABASE');
   });
 
+  it('exits 1 on a partial Dolt, naming what is set and what is missing', () => {
+    const result = migrate({ DOLT_DATABASE: 'fire_enrich', DOLT_USER: 'app' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Dolt is misconfigured: DOLT_USER, DOLT_DATABASE are set but DOLT_HOST is missing');
+  });
+
   it('exits 1 when Dolt is configured but the migration cannot run, so the build fails', () => {
     // Port 1 on loopback: nothing listens, the connection is refused at once.
     const result = migrate({ DOLT_HOST: '127.0.0.1', DOLT_PORT: '1', DOLT_DATABASE: 'fire_enrich' });
