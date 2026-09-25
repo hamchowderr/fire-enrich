@@ -56,7 +56,3 @@ export function detectEmailColumn(rows: CSVRow[], columns: string[]): {
     confidence: Math.round(confidence)
   };
 }
-
-export function getPreviewData(rows: CSVRow[], limit: number = 5): CSVRow[] {
-  return rows.slice(0, limit);
-}

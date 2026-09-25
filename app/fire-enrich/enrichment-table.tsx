@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { ChatPanel, ChatMessage } from "./chat-panel";
+import { RunChanges } from "./run-changes";
 import {
   Download,
   X,
@@ -49,6 +50,8 @@ export function EnrichmentTable({
   >("idle");
   const [currentRow, setCurrentRow] = useState(-1);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  // The committed Dolt run of this session, from the `complete` event.
+  const [runId, setRunId] = useState<string | null>(null);
   const [useAgents] = useState(true); // Default to using agents
   const [expandedAgentLogs, setExpandedAgentLogs] = useState(false);
   const [selectedRow, setSelectedRow] = useState<{
@@ -232,6 +235,7 @@ export function EnrichmentTable({
 
                 case "complete":
                   setStatus("completed");
+                  setRunId(typeof data.runId === "string" ? data.runId : null);
                   // Add a final success message (only if not already added)
                   setAgentMessages((prev) => {
                     const hasCompletionMessage = prev.some(
@@ -1445,6 +1449,13 @@ export function EnrichmentTable({
                     </a>
                   )}
                 </div>
+
+                {/* Changes since last run: last, so nothing above it moves */}
+                <RunChanges
+                  runId={runId}
+                  email={emailColumn ? selectedRow.row[emailColumn] : undefined}
+                  fields={fields}
+                />
               </div>
             </>
           )}

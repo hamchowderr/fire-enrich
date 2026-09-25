@@ -1,0 +1,132 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Research group: Product and positioning",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_product_search",
+            "name": "search",
+            "arguments": {
+              "query": "Firecrawl product"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Product and positioning",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"product_summary\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9},{\"url\":\"https://unread.example/about\",\"quote\":\"A quote from a page no tool returned.\",\"confidence\":0.5}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Open source footprint",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_oss_agent",
+            "name": "firecrawlAgent",
+            "arguments": {
+              "prompt": "Find the public source code repository of Firecrawl."
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Open source footprint",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"open_source_repo\",\"value\":\"https://github.com/firecrawl/firecrawl\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://github.com/firecrawl/firecrawl\",\"quote\":\"\\\"github\\\": \\\"https://github.com/firecrawl/firecrawl\\\"\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Homepage headline",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_home_scrape",
+            "name": "scrape",
+            "arguments": {
+              "url": "https://www.firecrawl.dev/"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Homepage headline",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"homepage_headline\",\"value\":\"Power AI agents with clean web data\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"# Power AI agents with   clean web data\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Team size",
+        "systemMessage": "You research facts about one company",
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "The team is about fifty people, but this is not the JSON you asked for."
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Careers page",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_careers_scrape",
+            "name": "scrape",
+            "arguments": "{\"url\":\"https://www.firecrawl.dev/careers\"}"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Careers page",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true,
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"open_roles\",\"value\":\"Founding Engineer\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/careers\",\"quote\":\"We are hiring a Founding Engineer.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    }
+  ]
+}

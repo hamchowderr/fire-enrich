@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import FirecrawlApp from '@mendable/firecrawl-js';
+import { Firecrawl } from 'firecrawl';
+import type { ScrapeOptions } from 'firecrawl';
 import { isRateLimited } from '@/lib/rate-limit';
 
 interface ScrapeRequestBody {
@@ -34,36 +35,38 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  let apiKey = process.env.FIRECRAWL_API_KEY;
-  
+  // The key comes from the environment only. It is injected from the secrets
+  // manager at runtime and is never read from the request.
+  const apiKey = process.env.FIRECRAWL_API_KEY;
+
   if (!apiKey) {
-    const headerApiKey = request.headers.get('X-Firecrawl-API-Key');
-    
-    if (!headerApiKey) {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'API configuration error. Please try again later or contact support.' 
-      }, { status: 500 });
-    }
-    
-    apiKey = headerApiKey;
+    return NextResponse.json({
+      success: false,
+      error: 'API configuration error. Please try again later or contact support.',
+    }, { status: 500 });
   }
 
   try {
-    const app = new FirecrawlApp({ apiKey });
+    const app = new Firecrawl({ apiKey });
     const body = await request.json() as ScrapeRequestBody;
     const { url, urls, ...params } = body;
 
     let result: ScrapeResult;
 
     if (url && typeof url === 'string') {
-      result = await app.scrapeUrl(url, params) as ScrapeResult;
+      const document = await app.scrape(url, params as ScrapeOptions);
+      result = { success: true, data: document as Record<string, unknown> };
     } else if (urls && Array.isArray(urls)) {
-      result = await app.batchScrapeUrls(urls, params) as ScrapeResult;
+      const job = await app.batchScrape(urls, { options: params as ScrapeOptions });
+      result = {
+        success: job.status === 'completed',
+        data: job as unknown as Record<string, unknown>,
+        ...(job.status === 'completed' ? {} : { error: `Batch scrape ${job.status}` }),
+      };
     } else {
       return NextResponse.json({ success: false, error: 'Invalid request format. Please check your input and try again.' }, { status: 400 });
     }
-    
+
     return NextResponse.json(result);
 
   } catch (error: unknown) {

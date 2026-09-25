@@ -16,6 +16,7 @@ export default function HeroScrapingTag({
   useEffect(() => {
     let progress = 0;
     let increaseProgress = -10;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const animate = () => {
       increaseProgress = (increaseProgress + 1) % 5;
@@ -34,11 +35,15 @@ export default function HeroScrapingTag({
       setValue(encryptText(label, progress, { randomizeChance: 0 }));
 
       const interval = 40 + progress * 20;
-      setTimeout(animate, interval);
+      timer = setTimeout(animate, interval);
     };
 
     animate();
-  }, []);
+
+    // Stop the pending tick so a re-run (new label) or unmount never leaves
+    // a second decrypt chain writing into this component.
+    return () => clearTimeout(timer);
+  }, [label]);
 
   return (
     <motion.div

@@ -4,7 +4,7 @@ A powerful AI-powered CSV enrichment tool that transforms basic contact lists in
 
 ## Overview
 
-Fire Enrich is an advanced data enrichment platform that takes CSV files containing company email addresses and automatically enhances them with valuable business information. Built on a sophisticated multi-agent architecture, it leverages Firecrawl for web scraping and OpenAI GPT-4 for intelligent data extraction.
+Fire Enrich is an advanced data enrichment platform that takes CSV files containing company email addresses and automatically enhances them with valuable business information. Each row runs a Mastra workflow whose agents research the company with Firecrawl search and scrape tools, and every model call goes through the Vercel AI Gateway.
 
 ## Architecture
 
@@ -30,8 +30,8 @@ Fire Enrich employs five specialized AI agents, each optimized for specific data
                               ┌────────────────────────────┼────────────────────┐
                               │                            │                    │
                     ┌─────────▼────────┐      ┌───────────▼──────┐   ┌─────────▼────────┐
-                    │ FirecrawlService │      │  OpenAIService   │   │SpecializedAgents│
-                    │  (Web Scraping)  │      │ (GPT-4 Extract)  │   │   (AI Agents)    │
+                    │ enrichRow (Mastra│      │  Firecrawl tools │   │    chat agent    │
+                    │    workflow)     │      │ (search, scrape) │   │  (Co-Pilot panel)│
                     └──────────────────┘      └──────────────────┘   └──────────────────┘
 ```
 
@@ -40,7 +40,7 @@ Fire Enrich employs five specialized AI agents, each optimized for specific data
 1. **Email Parsing**: Intelligent extraction of company information from email patterns
 2. **Search Query Generation**: Creates multiple targeted search queries per company
 3. **Multi-Source Scraping**: Aggregates data from multiple websites
-4. **AI Synthesis**: Combines and validates information using GPT-4
+4. **AI Synthesis**: Research agents combine and validate what the pages say
 5. **Confidence Scoring**: Each field includes a 0-1 confidence score
 6. **Source Attribution**: Tracks origin of each data point
 
@@ -65,7 +65,7 @@ For each row:
 ├─ Generate search queries
 ├─ Scrape multiple sources (Firecrawl)
 ├─ Select specialized agents
-├─ Extract structured data (GPT-4)
+├─ Extract structured data (research agents)
 ├─ Stream results via SSE
 └─ Update UI with animations
 ```
@@ -92,10 +92,10 @@ Fire Enrich requires two API keys:
 - Get your API key from the dashboard
 - Used for web scraping and search
 
-#### 2. OpenAI API Key
-- Sign up at [platform.openai.com](https://platform.openai.com)
-- Create an API key with GPT-4 access
-- Used for intelligent data extraction
+#### 2. Vercel AI Gateway API Key
+- Sign up at [vercel.com](https://vercel.com) and enable the [AI Gateway](https://vercel.com/docs/ai-gateway)
+- Create an API key
+- One key for every model call the Mastra agents make (no provider keys needed)
 
 ### Installation
 
@@ -107,19 +107,20 @@ cd hostedTools
 
 2. Install dependencies:
 ```bash
-pnpm install
+npm install
 ```
 
 3. Configure environment variables:
 ```bash
 # Create .env.local file
 FIRECRAWL_API_KEY=your_firecrawl_key
-OPENAI_API_KEY=your_openai_key
+AI_GATEWAY_API_KEY=your_ai_gateway_key
 ```
+`AI_GATEWAY_API_KEY` is for local development; on Vercel the deployment's OIDC token authenticates the gateway, so no key is set there.
 
 4. Run the development server:
 ```bash
-pnpm dev
+npm run dev
 ```
 
 5. Open [http://localhost:3000/fire-enrich](http://localhost:3000/fire-enrich)
@@ -204,7 +205,7 @@ If you prefer not to use environment variables, Fire Enrich supports entering AP
 - Slightly slower processing
 
 **Traditional Mode**:
-- Direct GPT-4 extraction
+- Direct model extraction
 - Faster processing
 - Good for simple fields
 - Lower token usage
@@ -219,7 +220,7 @@ If you prefer not to use environment variables, Fire Enrich supports entering AP
 ### Rate Limits
 
 - **Firecrawl**: Check your plan limits
-- **OpenAI**: GPT-4 token limits apply
+- **Vercel AI Gateway**: Model rate and spend limits apply
 - **Processing**: 1 row per second default
 - **Max Fields**: 10 per enrichment
 - **To set limit higher**: Feel free to pull the GitHub repo and deploy your own version

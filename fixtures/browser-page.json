@@ -1,0 +1,14 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Open https://www.firecrawl.dev/ and report the headline on the page.",
+        "systemMessage": "You read web pages that will not give up their content to a plain fetch",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Placeholder headline from fixtures/browser-page.json, reported for https://www.firecrawl.dev/."
+      }
+    }
+  ]
+}

@@ -30,8 +30,12 @@
     "app/**/*.tsx",
     "components/**/*.ts",
     "components/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
     "pages/**/*.ts",
     "pages/**/*.tsx",
+    "tests/**/*.ts",
+    "vitest.config.mts",
     ".next/types/**/*.ts"
   ],
   "exclude": [
@@ -40,8 +44,6 @@
     "out",
     "dist",
     "build",
-    "coverage",
-    "**/*.test.ts",
-    "**/*.test.tsx"
+    "coverage"
   ]
 }

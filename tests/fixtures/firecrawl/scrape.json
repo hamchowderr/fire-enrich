@@ -1,0 +1,22 @@
+{
+  "markdown": "Introducing the Firecrawl Developer Index, built for supercharging coding agents. [Read the announcement →](https://www.firecrawl.dev/blog/developer-index-launch?utm_source=firecrawl-web&utm_medium=banner&utm_campaign=developer-index-launch)\n\n[2 Months Free - Annually](https://www.firecrawl.dev/pricing)\n\n# Power AI agents with   clean web data\n\nThe web data API to search, scrape, and interact at scale.\n\n[It's also open source.](https://github.com/firecrawl/firecrawl)\n\n[Start for free](https://www.firecrawl.dev/signin?view=signup)\n\nSetup for agents\n\nSearch\n\nScrape\n\nMap\n\nCrawl\n\nSearch\n\n\\[ .JSON \\]\n\n```json\n1[\\\n2  {\\\n3    \"url\": \"https://example.com\",\\\n4    \"markdown\": \"# Getting Started...\",\\\n5    \"json\": { \"title\": \"Guide\", \"docs\": \"...\" },\\\n6    \"screenshot\": \"https://example.com/hero.png\"\\\n7  }\\\n8]\n```\n\nScraping...\n\nTrusted by 150,000+\n\ncompanies of all sizes\n\n![Shopify](https://www.firecrawl.dev/assets-original/logocloud/1.png)\n\n[![Lovable](https://www.firecrawl.dev/assets-original/logocloud/12.png)\\\\\n\\\\\nRead story](https://www.firecrawl.dev/blog/firecrawl-lovable-integration)\n\n![Canva](https://www.firecrawl.dev/assets-original/logocloud/7.png)\n\n[![Zapier](https://www.firecrawl.d",
+  "html": "<!DOCTYPE html><html lang=\"en\"><body class=\"geistmono_157ca88a-module__LhLXDG__variable roboto_mono_6d136503-module__9xzY1W__variable suisse_5fca7439-module__5fU0nW__variable font-sans text-accent-black bg-background-base overflow-x-clip\"><div></",
+  "metadata": {
+    "title": "Firecrawl - The web data API to search, scrape, and interact with the web at scale. 🔥",
+    "description": "Firecrawl is the web data API to search, scrape, and interact with the web at scale. Turn any source into clean Markdown or structured data your agents can ship with.",
+    "keywords": "Firecrawl,AI web data,web scraping API,AI agents,search API,interact API,web data infrastructure,LLM,open source",
+    "ogTitle": "Firecrawl - The web data API to search, scrape, and interact with the web at scale. 🔥",
+    "ogDescription": "Firecrawl is the web data API to search, scrape, and interact with the web at scale. Turn any source into clean Markdown or structured data your agents can ship with.",
+    "ogImage": "https://www.firecrawl.dev/og.png",
+    "ogUrl": "https://www.firecrawl.dev",
+    "ogSiteName": "Firecrawl - The web data API to search, scrape, and interact with the web at scale. 🔥",
+    "author": "Firecrawl",
+    "publisher": "Firecrawl",
+    "language": "en",
+    "favicon": "https://www.firecrawl.dev/favicon.png",
+    "sourceURL": "https://firecrawl.dev",
+    "url": "https://www.firecrawl.dev/",
+    "statusCode": 200,
+    "contentType": "text/html; charset=utf-8"
+  }
+}

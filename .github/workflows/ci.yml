@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every model call is served by AIMock from ./fixtures and every provider key
+# is a stub, so this workflow needs no repository secrets and can never reach
+# a real model, Firecrawl, or Turso.
+env:
+  USE_AIMOCK: 'true'
+  AIMOCK_URL: http://127.0.0.1:4010
+  OPENAI_BASE_URL: http://127.0.0.1:4010/v1
+  AI_GATEWAY_API_KEY: stub
+  FIRECRAWL_API_KEY: stub
+  TURSO_DATABASE_URL: file:./.mastra/ci.db
+  MASTRA_TELEMETRY_DISABLED: '1'
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # The Chromium download is cached per Playwright version, so a run only
+      # fetches it after an upgrade. `--with-deps` also installs the browser's
+      # system libraries with apt; those are not cached, so the install step
+      # runs on every hit and skips just the download.
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # The lockfile guard, typecheck, next lint, mastra lint and the Fallow
+      # dead-code gate, in that order; the first failure stops the chain.
+      - name: Check
+        run: npm run check
+
+      - name: Start AIMock
+        run: |
+          npx llmock -h 0.0.0.0 -p 4010 -f ./fixtures --validate-on-load --strict > aimock.log 2>&1 &
+          echo "Waiting for AIMock on port 4010..."
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:4010/health > /dev/null 2>&1 && echo "AIMock ready" && exit 0
+            sleep 1
+          done
+          echo "=== AIMock logs ===" && cat aimock.log
+          echo "AIMock failed to start" && exit 1
+
+      # libSQL opens the local database file without creating its directory.
+      - name: Prepare local Mastra storage
+        run: mkdir -p .mastra
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+
+      # Next rewrites package-lock.json when an @next/swc-* binary is missing
+      # from it, but only outside CI, so `npm run check:lockfile` above is what
+      # catches that here. This step catches any other build-time rewrite.
+      - name: Lockfile unchanged by the build
+        run: git diff --exit-code package-lock.json
+
+      # The browser tier, against the build above (`E2E_SKIP_BUILD=1` makes the
+      # Playwright config serve `.next` instead of building again). The config
+      # starts its own AIMock on 4031, the Firecrawl stub on 4131 and the app on
+      # 3601, and sets every variable the app reads itself, so the AIMock on
+      # 4010 above and this job's env play no part in it.
+      - name: E2E
+        run: npm run test:e2e
+        env:
+          E2E_SKIP_BUILD: '1'
+
+      # The HTML report, per-test screenshots and traces, and the mocks' logs
+      # (`tests/e2e/.logs/`: AIMock, the Firecrawl stub and its request log).
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e
+          path: |
+            playwright-report/
+            test-results/
+            tests/e2e/.logs/
+          if-no-files-found: ignore
+          # A re-run of the job uploads under the same name; without this the
+          # upload fails on the artifact the previous attempt left behind.
+          overwrite: true
+          retention-days: 14
+
+  # `db/schema.sql` against a real, throwaway Dolt server: the base branch's
+  # schema first, then this commit's migration on top, twice. The second run
+  # must be a no-op, and the upgraded database must have the same shape as one
+  # built fresh from this commit's schema (tests/dolt/migrate.live.test.ts).
+  # The server lives only for this job and has no data, so no secret is used.
+  migrate:
+    runs-on: ubuntu-latest
+    services:
+      dolt:
+        # Same exact version as the hosted Dolt server. Bump both together
+        # (see "Database migrations" in CLAUDE.md).
+        image: dolthub/dolt-sql-server:2.3.1
+        env:
+          DOLT_ROOT_PASSWORD: ci
+          DOLT_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+    env:
+      DOLT_HOST: 127.0.0.1
+      DOLT_PORT: '3306'
+      DOLT_USER: root
+      DOLT_PASSWORD: ci
+      DOLT_DATABASE: fire_enrich
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Wait for Dolt
+        run: |
+          for i in $(seq 1 60); do
+            node -e "require('mysql2/promise').createConnection({host:'127.0.0.1',port:3306,user:'root',password:'ci'}).then(c=>c.end()).catch(()=>process.exit(1))" && echo "Dolt ready" && exit 0
+            sleep 1
+          done
+          echo "Dolt did not accept connections" && exit 1
+
+      # The pull request's base commit, or the previous tip of main on a
+      # push. With no schema there yet, the migration below starts from empty.
+      - name: Apply the base branch's schema
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git show "$BASE_SHA:db/schema.sql" > db/schema.sql; then
+            npm run db:migrate
+          else
+            echo "No db/schema.sql at $BASE_SHA; starting from an empty database."
+          fi
+          git checkout -- db/schema.sql
+
+      - name: Migrate, re-run as a no-op, compare with a fresh database
+        run: npx vitest run tests/dolt/migrate.live.test.ts
+        env:
+          DOLT_TEST_HOST: 127.0.0.1
+          DOLT_TEST_PORT: '3306'
+          DOLT_TEST_USER: root
+          DOLT_TEST_PASSWORD: ci
+          DOLT_TEST_DATABASE: fire_enrich

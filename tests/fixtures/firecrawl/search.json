@@ -1,0 +1,73 @@
+{
+  "web": [
+    {
+      "url": "https://www.firecrawl.dev/",
+      "title": "Firecrawl",
+      "description": "# Power AI agents with   clean web data\nThe web data API to search, scrape, and interact at scale.\n\n## Start searching   today\n```python\n1# pip install firecrawl-py\n2from firecrawl import Firecrawl\n3\n4app = Firecrawl(api_key=\"fc-YOUR_API_KEY\")\n5\n6# Scrape a website:\n7app.scrape('firecrawl.dev')\n8\n9\n",
+      "position": 1,
+      "markdown": "Introducing the Firecrawl Developer Index, built for supercharging coding agents. [Read the announcement →](https://www.firecrawl.dev/blog/developer-index-launch?utm_source=firecrawl-web&utm_medium=banner&utm_campaign=developer-index-launch)\n\n[2 Months Free - Annually](https://www.firecrawl.dev/pricing)\n\n# Power AI agents with   clean web data\n\nThe web data API to search, scrape, and interact at scale.\n\n[It's also open source.](https://github.com/firecrawl/firecrawl)\n\n[Start for free](https://www.firecrawl.dev/signin?view=signup)\n\nSetup for agents\n\nSearch\n\nScrape\n\nMap\n\nCrawl\n\nSearch\n\n\\[ .JSON \\]\n\n```json\n1[\\\n2  {\\\n3    \"url\": \"https://example.com\",\\\n4    \"markdown\": \"# Getting Started...\",\\\n5    \"json\": { \"title\": \"Guide\", \"docs\": \"...\" },\\\n6    \"screenshot\": \"https://example.com/hero.png\"\\\n7  }\\\n8]\n```\n\nScraping...\n\nTrusted by 150,000+\n\ncompanies of all sizes\n\n![Shopify](https://www.firecrawl.dev/assets-original/logocloud/1.png)\n\n[![Lovable](https://www.firecrawl.dev/assets-original/logocloud/12.png)\\\\\n\\\\\nRead story](https://www.firecrawl.dev/blog/firecrawl-lovable-integration)\n\n![Canva](https://www.firecrawl.dev/assets-original/logocloud/7.png)\n\n[![Zapier](https://www.firecrawl.d",
+      "html": "<!DOCTYPE html><html lang=\"en\"><body class=\"geistmono_157ca88a-module__LhLXDG__variable roboto_mono_6d136503-module__9xzY1W__variable suisse_5fca7439-module__5fU0nW__variable font-sans text-accent-black bg-background-base overflow-x-clip\"><div></",
+      "links": [
+        "https://www.firecrawl.dev/blog/developer-index-launch?utm_source=firecrawl-web&utm_medium=banner&utm_campaign=developer-index-launch",
+        "https://www.firecrawl.dev/pricing",
+        "https://github.com/firecrawl/firecrawl",
+        "https://www.firecrawl.dev/signin?view=signup",
+        "https://www.firecrawl.dev/playground?endpoint=search&url=&autorun=true",
+        "https://www.firecrawl.dev/blog/firecrawl-lovable-integration",
+        "https://www.firecrawl.dev/blog/how-zapier-uses-firecrawl-to-power-chatbots",
+        "https://www.firecrawl.dev/blog/how-replit-uses-firecrawl-to-power-ai-agents"
+      ],
+      "metadata": {
+        "title": "Firecrawl - The web data API to search, scrape, and interact with the web at scale. 🔥",
+        "description": "Firecrawl is the web data API to search, scrape, and interact with the web at scale. Turn any source into clean Markdown or structured data your agents can ship with.",
+        "keywords": "Firecrawl,AI web data,web scraping API,AI agents,search API,interact API,web data infrastructure,LLM,open source",
+        "ogTitle": "Firecrawl - The web data API to search, scrape, and interact with the web at scale. 🔥",
+        "ogDescription": "Firecrawl is the web data API to search, scrape, and interact with the web at scale. Turn any source into clean Markdown or structured data your agents can ship with.",
+        "ogImage": "https://www.firecrawl.dev/og.png",
+        "ogUrl": "https://www.firecrawl.dev",
+        "ogSiteName": "Firecrawl - The web data API to search, scrape, and interact with the web at scale. 🔥",
+        "author": "Firecrawl",
+        "publisher": "Firecrawl",
+        "language": "en",
+        "favicon": "https://www.firecrawl.dev/favicon.png",
+        "sourceURL": "https://www.firecrawl.dev/",
+        "url": "https://www.firecrawl.dev/",
+        "statusCode": 200,
+        "contentType": "text/html; charset=utf-8"
+      }
+    },
+    {
+      "url": "https://github.com/firecrawl/firecrawl",
+      "title": "GitHub - firecrawl/firecrawl: The web data API to search, scrape, and ...",
+      "description": "# **🔥 Firecrawl**\n**The API to search, scrape, and interact with the web at scale.** **🔥** The web data API to find sources, extract content, and turn it into clean Markdown or structured data your agents can ship with.\n\n## Feature Overview\n| Feature | Description |\n|-|-|\n| [**Crawl**](https://git",
+      "position": 2,
+      "markdown": "[Skip to content](https://github.com/firecrawl/firecrawl#start-of-content)\n\nYou signed in with another tab or window. [Reload](https://github.com/firecrawl/firecrawl) to refresh your session.You signed out in another tab or window. [Reload](https://github.com/firecrawl/firecrawl) to refresh your session.You switched accounts on another tab or window. [Reload](https://github.com/firecrawl/firecrawl) to refresh your session.Dismiss alert\n\n{{ message }}\n\n[firecrawl](https://github.com/firecrawl)/ **[firecrawl](https://github.com/firecrawl/firecrawl)** Public\n\n- [Notifications](https://github.com/login?return_to=%2Ffirecrawl%2Ffirecrawl) You must be signed in to change notification settings\n- [Fork\\\\\n9.9k](https://github.com/login?return_to=%2Ffirecrawl%2Ffirecrawl)\n- [Star\\\\\n183k](https://github.com/login?return_to=%2Ffirecrawl%2Ffirecrawl)\n\n\nmain\n\n[**2273** Branches](https://github.com/firecrawl/firecrawl/branches) [**471** Tags](https://github.com/firecrawl/firecrawl/tags)\n\n[Go to Branches page](https://github.com/firecrawl/firecrawl/branches)[Go to Tags page](https://github.com/firecrawl/firecrawl/tags)\n\nGo to file\n\nCode\n\nOpen more actions menu\n\n## Latest commit\n\n![mrod9997](https:",
+      "html": "<!DOCTYPE html><html lang=\"en\" data-color-mode=\"auto\" data-light-theme=\"light\" data-dark-theme=\"dark\" data-a11y-animated-images=\"system\" data-a11y-link-underlines=\"true\" data-turbo-loaded=\"\">\n\n  <body class=\"logged-out env-production page-responsive\" style=\"word-wrap: break-word;\">\n    <div data-tur",
+      "links": [
+        "https://github.com/firecrawl/firecrawl#start-of-content",
+        "https://github.com/firecrawl/firecrawl",
+        "https://github.com/firecrawl",
+        "https://github.com/login?return_to=%2Ffirecrawl%2Ffirecrawl",
+        "https://github.com/firecrawl/firecrawl/branches",
+        "https://github.com/firecrawl/firecrawl/tags",
+        "https://github.com/firecrawl/firecrawl/commit/504905318fe81dc46a4a36d43112a8520b8551bd",
+        "https://github.com/firecrawl/firecrawl/commits/main/"
+      ],
+      "metadata": {
+        "title": "GitHub - firecrawl/firecrawl: The web data API to search, scrape, and interact at scale. 🔥 · GitHub",
+        "description": "The web data API to search, scrape, and interact at scale. 🔥 - firecrawl/firecrawl",
+        "ogTitle": "GitHub - firecrawl/firecrawl: The web data API to search, scrape, and interact at scale. 🔥",
+        "ogDescription": "The web data API to search, scrape, and interact at scale. 🔥 - firecrawl/firecrawl",
+        "ogImage": "https://repository-images.githubusercontent.com/787076358/f9616c09-3701-41ef-b5a6-fdf912ffb15b",
+        "ogUrl": "https://github.com/firecrawl/firecrawl",
+        "ogSiteName": "GitHub",
+        "language": "en",
+        "favicon": "https://github.githubassets.com/favicons/favicon.svg",
+        "sourceURL": "https://github.com/firecrawl/firecrawl",
+        "url": "https://github.com/firecrawl/firecrawl",
+        "statusCode": 200,
+        "contentType": "text/html; charset=utf-8"
+      }
+    }
+  ]
+}
