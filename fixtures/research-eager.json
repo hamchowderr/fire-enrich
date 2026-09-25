@@ -1,0 +1,87 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Email to identify: eager@firecrawl.dev",
+        "systemMessage": "You identify the company"
+      },
+      "response": {
+        "content": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Eager reads",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false
+      },
+      "latency": 25,
+      "chunkSize": 4,
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_eager_reads_search",
+            "name": "search",
+            "arguments": {
+              "query": "eager reads"
+            }
+          },
+          {
+            "id": "call_eager_reads_scrape",
+            "name": "scrape",
+            "arguments": {
+              "url": "https://www.firecrawl.dev/careers?check=eager-tool-execution-reads"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Eager reads",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"homepage_headline\",\"value\":\"Power AI agents with clean web data\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"# Power AI agents with   clean web data\",\"confidence\":0.9}],\"sourcesAgree\":true},{\"field\":\"open_roles\",\"value\":\"Founding Engineer\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/careers?check=eager-tool-execution-reads\",\"quote\":\"We are hiring a Founding Engineer.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Eager fallback",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false
+      },
+      "latency": 25,
+      "chunkSize": 4,
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_eager_fallback_search",
+            "name": "search",
+            "arguments": {
+              "query": "eager fallback"
+            }
+          },
+          {
+            "id": "call_eager_fallback_scrape",
+            "name": "scrape",
+            "arguments": {
+              "url": "https://www.firecrawl.dev/careers?check=eager-tool-execution-fallback"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Eager fallback",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "Both pages were read, but this answer is not the JSON you asked for."
+      }
+    }
+  ]
+}

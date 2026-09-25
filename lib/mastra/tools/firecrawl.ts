@@ -22,9 +22,9 @@
  *
  * ### Why trim in `execute` rather than in `toModelOutput`
  *
- * `@mastra/core` 1.70.0 does support the hook: `ToolAction.toModelOutput`
+ * `@mastra/core` 1.71.0 does support the hook: `ToolAction.toModelOutput`
  * (`dist/tools/types.d.ts`) is applied at runtime to a successful tool result
- * (`dist/agent-CtMGPsX8.js`, "if (tool?.toModelOutput && toolCall.result !=
+ * (`dist/agent-BOxKOk3n.js`, "if (tool?.toModelOutput && toolCall.result !=
  * null)"). It is deliberately not used. `toModelOutput` bounds only the copy
  * handed to the model; the untrimmed result still travels through the tool
  * stream, the trace, and storage, which is where a 500 KB scrape actually
