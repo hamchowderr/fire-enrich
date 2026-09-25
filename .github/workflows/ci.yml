@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [develop]
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -153,7 +153,7 @@ jobs:
           done
           echo "Dolt did not accept connections" && exit 1
 
-      # The pull request's base commit, or the previous tip of develop on a
+      # The pull request's base commit, or the previous tip of main on a
       # push. With no schema there yet, the migration below starts from empty.
       - name: Apply the base branch's schema
         env:
