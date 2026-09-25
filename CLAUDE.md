@@ -108,9 +108,10 @@ That test migrates, checks that a second run commits nothing, and compares the
 result with a fresh database. It is skipped unless `DOLT_TEST_HOST` and
 `DOLT_TEST_DATABASE` are set. Never point them at a database whose data matters.
 
-Dolt is pinned to `dolthub/dolt-sql-server:2.3.1` on both the hosted server
-(its Coolify service compose) and CI's `migrate` job. Server and CI must be
-bumped together, to the same exact tag. Never pin the server lower than the
+Dolt is pinned to `dolthub/dolt-sql-server:2.3.1` in three places: the hosted
+server (its Coolify service compose), CI's `migrate` job, and
+`docker-compose.dolt.yml` (the self-hosted setup in `docs/dolt-setup.md`).
+All three must be bumped together, to the same exact tag. Never pin the server lower than the
 version it runs: an older Dolt can misread newer storage formats.
 
 Apart from that opt-in migration test, tests never touch a real model, Firecrawl, or database: `tests/setup.ts` forces
@@ -140,4 +141,5 @@ evaluation API is experimental.
 
 ## Conventions & Patterns
 
+- Dolt is optional: it enables versioned run history and run-to-run diffs. Setup for local dev and a VPS (`docker-compose.dolt.yml`, TLS, Vercel env): `docs/dolt-setup.md`.
 - The Fire Enrich Board artifact is built and republished by the braynee `board` skill (`/braynee:board`); the repo has no board script of its own.

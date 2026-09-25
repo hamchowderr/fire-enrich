@@ -1,0 +1,16 @@
+# dolt sql-server configuration for docker-compose.dolt.yml (see docs/dolt-setup.md).
+#
+# The image passes this file to `dolt sql-server --config`, which then ignores
+# every command-line flag, so host, port and data_dir are all set here.
+log_level: info
+
+data_dir: /var/lib/dolt
+
+listener:
+  host: 0.0.0.0
+  port: 3306
+  # Generated on the server, never committed (deploy/dolt/certs/ is gitignored).
+  tls_cert: /etc/dolt/certs/server.crt
+  tls_key: /etc/dolt/certs/server.key
+  # Refuse every connection that does not negotiate TLS.
+  require_secure_transport: true

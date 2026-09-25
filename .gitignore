@@ -36,6 +36,10 @@ yarn-error.log*
 .env*.local
 .env
 
+# Dolt server secrets for docker-compose.dolt.yml (docs/dolt-setup.md)
+/deploy/dolt/dolt.env
+/deploy/dolt/certs/
+
 # vercel
 .vercel
 
