@@ -114,11 +114,9 @@ That test migrates, checks that a second run commits nothing, and compares the
 result with a fresh database. It is skipped unless `DOLT_TEST_HOST` and
 `DOLT_TEST_DATABASE` are set. Never point them at a database whose data matters.
 
-Dolt is pinned to `dolthub/dolt-sql-server:2.3.1` in three places: the hosted
-server (its Coolify service compose), CI's `migrate` job, and
-`docker-compose.dolt.yml` (the self-hosted setup in `docs/dolt-setup.md`).
-All three must be bumped together, to the same exact tag. Never pin the server lower than the
-version it runs: an older Dolt can misread newer storage formats.
+Dolt is pinned to `dolthub/dolt-sql-server:2.3.1` in `docker-compose.dolt.yml` and in the CI
+`migrate` job. Upgrade both together, and never to a version lower than the one a server already
+runs: older Dolt releases can misread newer storage formats.
 
 Apart from that opt-in migration test, tests never touch a real model, Firecrawl, or database: `tests/setup.ts` forces
 `USE_AIMOCK=true` (model calls answered from `fixtures/*.json`), stub API keys, and a

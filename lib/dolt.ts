@@ -10,9 +10,10 @@
  * Configuration comes from the environment, never from a checked-in file:
  *
  * - `DOLT_HOST`, `DOLT_PORT`, `DOLT_USER`, `DOLT_PASSWORD`, `DOLT_DATABASE`
- * - `DOLT_TLS_CA_B64` — base64 of the server's CA certificate. The hosted
- *   server presents a self-signed certificate, which Node rejects unless it is
- *   told to trust that CA; local dev has no TLS and leaves this unset. It is
+ * - `DOLT_TLS_CA_B64` — base64 of the server's CA certificate. A Dolt
+ *   server that requires TLS with a self-signed certificate is rejected by
+ *   Node unless it is told to trust that CA; a server without TLS, such as a
+ *   local dev server, leaves this unset. It is
  *   base64 because a PEM is multi-line and environment variables are not.
  *
  * Dolt is optional: the app boots, enriches and chats with none of these set.

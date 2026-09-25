@@ -8,8 +8,9 @@
  * Three steps, in order:
  *
  *   1. `CREATE DATABASE` on a connection with no database selected, only
- *      when the database does not exist yet (the hosted app user may not
- *      create databases, but owns the ones that exist).
+ *      when the database does not exist yet (an app user such as the one
+ *      docker-compose.dolt.yml creates owns its database but may not create
+ *      databases).
  *   2. Every statement in `db/schema.sql`, each already `IF NOT EXISTS`.
  *   3. `DOLT_COMMIT` — but only if step 2 actually changed something.
  *
@@ -61,8 +62,8 @@ if (config.state === 'off') {
   process.exit(1);
 }
 
-// Mirrors lib/dolt.ts: pass the CA so verification stays on against the hosted
-// server's self-signed certificate. Unset locally, where there is no TLS.
+// Mirrors lib/dolt.ts: pass the CA so verification stays on against a server's
+// self-signed certificate. Unset locally, where there is no TLS.
 const ssl = tlsCa ? { ca: Buffer.from(tlsCa, 'base64') } : undefined;
 const base = { host, port, user, password, ...(ssl ? { ssl } : {}) };
 
@@ -92,9 +93,9 @@ async function dirtyTables(connection) {
 async function main() {
   // Step 1 needs a connection with no database selected: `USE fire_enrich`
   // would fail on a server that has never seen it. Only create when the
-  // database is missing: the hosted app user owns its databases but has no
-  // server-wide CREATE right, so an unconditional CREATE DATABASE is denied
-  // even though the database already exists.
+  // database is missing: an app user can own its database without a
+  // server-wide CREATE right, and for that user an unconditional CREATE
+  // DATABASE is denied even though the database already exists.
   const admin = await mysql.createConnection(base);
   try {
     const [found] = await admin.query(

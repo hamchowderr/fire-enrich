@@ -121,7 +121,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       dolt:
-        # Same exact version as the hosted Dolt server. Bump both together
+        # Same exact tag as docker-compose.dolt.yml. Bump both together
         # (see "Database migrations" in CLAUDE.md).
         image: dolthub/dolt-sql-server:2.3.1
         env:

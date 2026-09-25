@@ -22,7 +22,7 @@
  *   3. not have a second copy nested under `node_modules/next/node_modules/`.
  *      A nested copy is the one `next` resolves to, so npm treats the top-level
  *      copy as extraneous and deletes it on the next `npm install`. Next then
- *      adds it back on the next build. The upstream lockfile was in this state.
+ *      adds it back on the next build.
  *
  * Plain `.mjs` with no dependencies, so it needs nothing installed or built.
  */

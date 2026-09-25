@@ -214,10 +214,9 @@ certificate, not the key. Never copy `server.key` off the server.
 > one self-signed server certificate, which signs nothing else. **Never set
 > `DOLT_TLS_CA_B64` to a shared or organisation CA.** A CA that signs other
 > certificates would let any of those certificates impersonate this server.
-> The fix in code is tracked as `fe-ah9`. Until then, still put the correct
-> name in the certificate (step 2): clients that do check host names need it,
-> such as `mysql --ssl-mode=VERIFY_IDENTITY`, and so will the app after the
-> fix.
+> Still put the correct name in the certificate (step 2): clients that check
+> host names need it, such as `mysql --ssl-mode=VERIFY_IDENTITY`, and so does
+> the app once `lib/dolt.ts` sets `ssl.verifyIdentity`.
 
 ### 6. Set the Vercel environment variables
 
