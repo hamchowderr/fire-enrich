@@ -39,8 +39,6 @@
     "components/ui/table.tsx:TableFooter",
     "components/ui/table.tsx:TableCaption",
     "hooks/useDebouncedEffect.ts:useDebouncedEffect",
-    "lib/rate-limit.ts:getRateLimiter",
-    "lib/rate-limit.ts:getIP",
     "lib/types/field-generation.ts:FieldDefinition",
     "lib/utils/field-utils.ts:formatDisplayName",
     "utils/set-timeout-on-visible.ts:setTimeoutOnVisible"
