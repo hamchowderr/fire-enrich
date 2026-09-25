@@ -77,17 +77,20 @@ npm run fallow:gate    # dead-code gate: fails on any finding not in fallow.base
 npm run test:ai        # starts AIMock on :4010, runs vitest, stops it
 npm test               # vitest only; tests/routes/* need `npm run aimock` running
 npm run build          # next build
-npm run build:vercel   # Vercel's build: next build, then db:migrate on production (see below)
+npm run build:vercel   # Vercel's build: next build, then db:migrate:libsql and db:migrate on production (see below)
 npm run test:e2e       # Playwright smoke against the built app; CI runs it after the build with E2E_SKIP_BUILD=1
 npm run db:sweep-runs  # merge run/* branches idle over 6h into main (partial, or failed if given up); -- --older-than-hours N, -- --dry-run
 npm run db:migrate     # apply db/schema.sql to the DOLT_* database; a re-run is a no-op with no commit
+npm run db:migrate:libsql # create the profile and plan tables in the TURSO_* database (or the local file); idempotent
 ```
 
 ### Database migrations
 
 Vercel builds with `npm run build:vercel` (`buildCommand` in `vercel.json`, which runs `scripts/vercel-build.mjs`):
-`npm run build`, then `db:migrate` against that deployment's `DOLT_*` database.
-It migrates only when `VERCEL_ENV=production`, or on Preview when
+`npm run build`, then `db:migrate:libsql` whenever `TURSO_DATABASE_URL` is set (every
+environment; it only creates what is missing), then `db:migrate` against that
+deployment's `DOLT_*` database.
+The Dolt migration runs only when `VERCEL_ENV=production`, or on Preview when
 `DOLT_PREVIEW_MIGRATE=1` is set there. Set that flag only when Preview's `DOLT_*`
 point at a database no production deploy uses. A failed migration fails the
 deployment. Local `npm run build` is plain `next build` and needs no database.
@@ -98,9 +101,9 @@ succeeds. With some set but `DOLT_HOST` or `DOLT_DATABASE` missing (or
 whitespace), the build fails before `next build` and names the missing variables;
 `db:migrate` and `db:sweep-runs` fail the same way.
 
-The migration runs while the previous deployment still serves traffic, and an
+Both migrations run while the previous deployment still serves traffic, and an
 instant rollback puts old code on the new schema. So every change to
-`db/schema.sql` must be additive and backwards-compatible: add tables, nullable
+`db/schema.sql` and `lib/app-db-schema.mjs` must be additive and backwards-compatible: add tables, nullable
 columns, columns with defaults, and non-unique indexes. A UNIQUE constraint or
 index is not additive-safe: it fails on existing duplicates and rejects writes
 that old code still makes. Never drop or rename a column or
@@ -147,5 +150,6 @@ evaluation API is experimental.
 
 ## Conventions & Patterns
 
+- Business profiles and saved plans live in the libSQL database (Turso, or the local file), the same one Mastra's store uses, in tables of their own (`lib/app-db-schema.mjs`). They need no Dolt. A run in Dolt names its plan by `plan_id`, a plain value.
 - Dolt is optional: it enables versioned run history and run-to-run diffs. Setup for local dev and a VPS (`docker-compose.dolt.yml`, TLS, Vercel env): `docs/dolt-setup.md`.
 - The Fire Enrich Board artifact is built and republished by the braynee `board` skill (`/braynee:board`); the repo has no board script of its own.

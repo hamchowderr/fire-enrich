@@ -2,7 +2,7 @@ import { RequestContext } from '@mastra/core/request-context';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { badRequest, notFound, parseJsonBody, requireDolt } from '@/lib/api/profiles-http';
+import { badRequest, notFound, parseJsonBody } from '@/lib/api/profiles-http';
 import { mastra } from '@/lib/mastra';
 import {
   normalizePlanNames,
@@ -17,9 +17,6 @@ import {
   FieldGenerationResponse,
   type FieldGenerationResponseType,
 } from '@/lib/types/field-generation';
-
-/** Named in the 503 when a body needs Dolt and it is not configured. */
-const FEATURE = 'Saved plans';
 
 /**
  * `POST /api/generate-fields` → a research plan.
@@ -86,9 +83,6 @@ export async function POST(request: NextRequest) {
 
   try {
     if (planId) {
-      const unconfigured = requireDolt(FEATURE);
-      if (unconfigured) return unconfigured;
-
       const saved = await getPlan(planId);
       if (!saved) return notFound(planId, 'plan');
 
@@ -104,13 +98,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'profileId is required to save a plan' }, { status: 400 });
     }
 
-    // A caller naming a profile gets a clear answer when it cannot be used,
-    // rather than a plan made silently for the generic one.
-    if (profileId) {
-      const unconfigured = requireDolt(save ? FEATURE : undefined);
-      if (unconfigured) return unconfigured;
-    }
-
+    // A caller naming a profile that does not exist gets a 404 rather than a
+    // plan made silently for the generic one.
     const profile = await resolvePlannerProfile(profileId);
     if (profileId && profile.source === 'generic') return notFound(profileId);
 

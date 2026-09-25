@@ -37,10 +37,15 @@ function profile(id: string, name: string): Profile {
 const NEWEST = profile('newest', 'Example Co');
 const CONFIGURED = profile('configured', 'Example Labs');
 
-const DOLT_ENV = { DOLT_HOST: '127.0.0.1', DOLT_DATABASE: 'fire_enrich_test' } as const;
+const DOLT_ENV = ['DOLT_HOST', 'DOLT_PORT', 'DOLT_USER', 'DOLT_PASSWORD', 'DOLT_DATABASE'] as const;
+const savedDolt: Record<string, string | undefined> = {};
 
+// Profiles live in libSQL, not Dolt: every case runs with no Dolt configured.
 beforeEach(() => {
-  Object.assign(process.env, DOLT_ENV);
+  for (const key of DOLT_ENV) {
+    savedDolt[key] = process.env[key];
+    delete process.env[key];
+  }
   delete process.env.DEFAULT_PROFILE_ID;
   getProfile.mockImplementation(async (id) =>
     [NEWEST, CONFIGURED].find((candidate) => candidate.id === id) ?? null
@@ -49,7 +54,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const key of Object.keys(DOLT_ENV)) delete process.env[key];
+  for (const key of DOLT_ENV) {
+    if (savedDolt[key] === undefined) delete process.env[key];
+    else process.env[key] = savedDolt[key];
+  }
   delete process.env.DEFAULT_PROFILE_ID;
   vi.clearAllMocks();
 });
@@ -88,13 +96,12 @@ describe('resolvePlannerProfile', () => {
     await expect(resolvePlannerProfile()).resolves.toMatchObject({ source: 'generic' });
   });
 
-  it('plans with a generic profile when Dolt is not configured', async () => {
-    for (const key of Object.keys(DOLT_ENV)) delete process.env[key];
-
+  it('reads profiles with no Dolt configured', async () => {
     await expect(resolvePlannerProfile('configured')).resolves.toMatchObject({
-      source: 'generic',
+      source: 'requested',
+      profile: { name: 'Example Labs' },
     });
-    expect(getProfile).not.toHaveBeenCalled();
+    expect(getProfile).toHaveBeenCalledWith('configured');
   });
 
   it('degrades to generic when the default lookup fails', async () => {

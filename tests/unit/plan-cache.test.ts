@@ -4,11 +4,11 @@ import type { SavedPlan } from '@/lib/plans';
 import type { ResearchPlanType } from '@/lib/mastra/schemas';
 
 /**
- * The two-layer plan cache: memory, then saved plans in Dolt.
+ * The two-layer plan cache: memory, then saved plans in libSQL.
  *
  * `lib/plans` is mocked, so the second layer is whatever `findPlanByFieldSet`
- * is told to answer and no database is involved. Dolt "configured" is the
- * environment switch `isDoltConfigured` reads, set per case.
+ * is told to answer and no database is involved. No Dolt is configured in any
+ * case: saved plans do not need it.
  */
 const { findPlanByFieldSet } = vi.hoisted(() => ({
   findPlanByFieldSet: vi.fn<(fieldNames: readonly string[]) => Promise<SavedPlan | null>>(),
@@ -175,16 +175,14 @@ describe('plan cache in memory', () => {
     expect(await cache.getPlanForFields(['a'], HOUR + 1)).not.toBeNull();
   });
 
-  it('never consults saved plans while Dolt is not configured', async () => {
-    expect(await cache.getPlanForFields(['a'], 1)).toBeNull();
-    expect(findPlanByFieldSet).not.toHaveBeenCalled();
-  });
 });
 
-describe('plan cache over saved plans, with Dolt configured', () => {
-  beforeEach(() => {
-    process.env.DOLT_HOST = '127.0.0.1';
-    process.env.DOLT_DATABASE = 'fire_enrich';
+describe('plan cache over saved plans, with no Dolt configured', () => {
+  it('consults saved plans on a miss even though Dolt is not configured', async () => {
+    findPlanByFieldSet.mockResolvedValue(null);
+
+    expect(await cache.getPlanForFields(['a'], 1)).toBeNull();
+    expect(findPlanByFieldSet).toHaveBeenCalledWith(['a']);
   });
 
   it('answers from memory without asking for a saved plan', async () => {

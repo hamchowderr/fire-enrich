@@ -1,5 +1,7 @@
 /**
- * Saved research plans — the planner's output for one profile, kept in Dolt.
+ * Saved research plans — the planner's output for one profile, kept in the
+ * app's libSQL database next to profiles (`lib/app-db.ts`: Turso, or the
+ * local file fallback), so saved plans work with or without Dolt.
  *
  * A saved plan can be reused across runs, read back exactly as it was when a
  * run followed it, and found again from the field set an enrichment request
@@ -7,6 +9,10 @@
  * in-memory cache still answers first, and this module answers when that
  * misses — another process served field generation, the process restarted,
  * or the entry expired.
+ *
+ * A run recorded in Dolt names the plan it followed by `plan_id`, a plain
+ * value: the two databases share no foreign key, so a run keeps the id of a
+ * plan deleted later.
  *
  * Naming: a row is returned with its column names (`profile_id`,
  * `created_at`), as a profile is. The write input takes `profileId`, the
@@ -16,14 +22,11 @@
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 
-import { commit, query, select, toJsonColumn } from '@/lib/dolt';
+import { appDb, parseJsonColumns, type Row, selectRows, toJsonColumn } from '@/lib/app-db';
 import { ResearchPlan } from '@/lib/mastra/schemas';
 
 /** Columns holding JSON, parsed on read and stringified on write. */
 const JSON_COLUMNS = ['plan'] as const;
-
-/** Identity written to `dolt_log` for changes made through the plans API. */
-const COMMIT_AUTHOR = 'Fire Enrich <fire-enrich@localhost>';
 
 /**
  * What a client may send to save a plan.
@@ -65,41 +68,48 @@ export type SavedPlan = z.infer<typeof savedPlanSchema>;
 
 /**
  * Columns selected for a plan, in a fixed order so reads are identical.
- * `plan` is backticked because it is a reserved word in Dolt's parser.
+ * `plan` is quoted because PLAN is a keyword in SQLite (EXPLAIN QUERY PLAN).
  */
-const PLAN_COLUMNS = 'id, profile_id, goal, audience, `plan`, created_at';
+const PLAN_COLUMNS = 'id, profile_id, goal, audience, "plan", created_at';
 
 const SELECT_PLAN_BY_ID = `SELECT ${PLAN_COLUMNS} FROM research_plans WHERE id = ?`;
 const SELECT_PLANS_FOR_PROFILE = `SELECT ${PLAN_COLUMNS} FROM research_plans WHERE profile_id = ? ORDER BY created_at DESC, id DESC`;
+/**
+ * Insert only when the profile exists, in one statement: zero rows inserted
+ * means the profile is missing. One statement is atomic, so a concurrent
+ * profile delete cannot slip between a check and the write, and the answer
+ * does not depend on whether the connection enforces foreign keys.
+ */
 const INSERT_PLAN =
-  'INSERT INTO research_plans (id, profile_id, goal, audience, `plan`) VALUES (?, ?, ?, ?, ?)';
+  'INSERT INTO research_plans (id, profile_id, goal, audience, "plan") SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM profiles WHERE id = ?)';
 const DELETE_PLAN = 'DELETE FROM research_plans WHERE id = ?';
 
 /**
  * The lookup behind {@link findPlanByFieldSet}, done in SQL so only the one
  * winning row crosses the wire.
  *
- * `JSON_EXTRACT(plan, '$.fields[*].name')` is the plan's field-name array;
- * `JSON_CONTAINS` with the requested names (bound as one JSON array) keeps the
- * plans whose set covers every requested name — an exact match is the case
- * where the sizes are equal. Ordering by the number of planned fields puts the
- * exact match, else the smallest superset, first; `created_at` breaks ties in
+ * The requested names are bound as one JSON array. A plan qualifies when no
+ * requested name is missing from its `$.fields[*].name` (`json_each` over
+ * both), so its set covers the request — an exact match is the case where the
+ * sizes are equal. Ordering by the number of planned fields puts the exact
+ * match, else the smallest superset, first; `created_at` breaks ties in
  * favour of the newest plan. The size is the number of planned fields rather
  * than distinct names; a plan with a duplicate name is flagged by `planIssues`
  * at write time and is not worth a second pass here.
  */
-const FIELD_NAMES = "JSON_EXTRACT(`plan`, '$.fields[*].name')";
-const FIELD_COUNT = "JSON_LENGTH(JSON_EXTRACT(`plan`, '$.fields'))";
-const SELECT_PLAN_COVERING = `SELECT ${PLAN_COLUMNS} FROM research_plans WHERE JSON_CONTAINS(${FIELD_NAMES}, CAST(? AS JSON)) ORDER BY ${FIELD_COUNT} ASC, created_at DESC, id DESC LIMIT 1`;
+const SELECT_PLAN_COVERING = `SELECT ${PLAN_COLUMNS} FROM research_plans AS p
+  WHERE NOT EXISTS (
+    SELECT 1 FROM json_each(?) AS wanted
+    WHERE wanted.value NOT IN (
+      SELECT json_extract(field.value, '$.name') FROM json_each(p."plan", '$.fields') AS field
+    )
+  )
+  ORDER BY json_array_length(p."plan", '$.fields') ASC, created_at DESC, id DESC
+  LIMIT 1`;
 
 /**
- * A write named a profile that does not exist.
- *
- * The database enforces the reference (`fk_research_plans_profile`), so this
- * translates its error rather than reading the profile first: a read-then-write
- * would still lose the race with a concurrent profile delete, and would cost a
- * round trip on every save to catch a case the constraint already catches.
- * Carries the id so the route can answer 404 naming it.
+ * A write named a profile that does not exist. Carries the id so the route can
+ * answer 404 naming it.
  */
 export class PlanProfileMissingError extends Error {
   readonly profileId: string;
@@ -111,35 +121,27 @@ export class PlanProfileMissingError extends Error {
   }
 }
 
-/**
- * Whether the driver is reporting a foreign-key reference to a missing row.
- *
- * `profile_id` carries the only foreign key on the table, so an
- * `ER_NO_REFERENCED_ROW_2` (errno 1452, which is what Dolt raises too) from a
- * plan write is always that reference.
- */
-function isMissingProfile(error: unknown): boolean {
-  return (error as { code?: unknown } | null)?.code === 'ER_NO_REFERENCED_ROW_2';
+function toPlan(row: Row): SavedPlan {
+  return parseJsonColumns(row, JSON_COLUMNS) as SavedPlan;
 }
 
 /** Read one saved plan. `null` when no row has that id. */
 export async function getPlan(id: string): Promise<SavedPlan | null> {
-  const [row] = await select<SavedPlan>(SELECT_PLAN_BY_ID, [id], JSON_COLUMNS);
-  return row ?? null;
+  const [row] = await selectRows(SELECT_PLAN_BY_ID, [id]);
+  return row ? toPlan(row) : null;
 }
 
 /** Every plan saved for a profile, newest first. */
 export async function listPlans(profileId: string): Promise<SavedPlan[]> {
-  return select<SavedPlan>(SELECT_PLANS_FOR_PROFILE, [profileId], JSON_COLUMNS);
+  return (await selectRows(SELECT_PLANS_FOR_PROFILE, [profileId])).map(toPlan);
 }
 
 /**
- * Save a plan under a profile and commit it.
+ * Save a plan under a profile.
  *
- * The id is generated here rather than by the database so the commit message
- * can name the row it created, and so the caller has the id without a second
- * read. The plan is stored whole, as one JSON value: its shape is the
- * planner's to change, and a run reads it back as one unit.
+ * The id is generated here rather than by the database so the caller has it
+ * without a second lookup. The plan is stored whole, as one JSON value: its
+ * shape is the planner's to change, and a run reads it back as one unit.
  *
  * @throws {PlanProfileMissingError} when no profile has `profileId`.
  */
@@ -147,16 +149,11 @@ export async function savePlan(input: SavePlanInput): Promise<SavedPlan> {
   const { profileId, goal, audience, plan } = savePlanSchema.parse(input);
   const id = nanoid();
 
-  try {
-    await query(INSERT_PLAN, [id, profileId, goal, audience ?? null, toJsonColumn(plan)]);
-  } catch (error) {
-    if (isMissingProfile(error)) throw new PlanProfileMissingError(profileId);
-    throw error;
-  }
-
-  // Reached only once the insert succeeded, so a rejected write never leaves a
-  // commit behind claiming it happened.
-  await commit(`Save plan ${id} for profile ${profileId}`, COMMIT_AUTHOR);
+  const inserted = await (await appDb()).execute({
+    sql: INSERT_PLAN,
+    args: [id, profileId, goal, audience ?? null, toJsonColumn(plan), profileId],
+  });
+  if (inserted.rowsAffected === 0) throw new PlanProfileMissingError(profileId);
 
   // Read back rather than returning the input: `created_at` comes from the
   // database, and this proves the row is actually readable.
@@ -167,20 +164,15 @@ export async function savePlan(input: SavePlanInput): Promise<SavedPlan> {
 }
 
 /**
- * Delete a saved plan and commit it. `false` when no row had that id.
+ * Delete a saved plan. `false` when no row had that id.
  *
- * Only the plan row goes. Runs that followed it stay, with their `plan_id`
- * set to NULL by `fk_enrichment_runs_plan` (ON DELETE SET NULL): a run is the
- * record of what was found, and that record outlives the plan.
+ * Only the plan row goes. Runs recorded in Dolt that followed it keep their
+ * `plan_id`: a run is the record of what was found, and that record outlives
+ * the plan.
  */
 export async function deletePlan(id: string): Promise<boolean> {
-  const existing = await getPlan(id);
-  if (!existing) return false;
-
-  await query(DELETE_PLAN, [id]);
-  await commit(`Delete plan ${id}`, COMMIT_AUTHOR);
-
-  return true;
+  const deleted = await (await appDb()).execute({ sql: DELETE_PLAN, args: [id] });
+  return deleted.rowsAffected > 0;
 }
 
 /**
@@ -197,6 +189,6 @@ export async function findPlanByFieldSet(fieldNames: readonly string[]): Promise
   const wanted = [...new Set(fieldNames)];
   if (wanted.length === 0) return null;
 
-  const [row] = await select<SavedPlan>(SELECT_PLAN_COVERING, [JSON.stringify(wanted)], JSON_COLUMNS);
-  return row ?? null;
+  const [row] = await selectRows(SELECT_PLAN_COVERING, [JSON.stringify(wanted)]);
+  return row ? toPlan(row) : null;
 }

@@ -7,17 +7,16 @@
  *
  * The first layer is this process's memory: entries expire after
  * {@link PLAN_TTL_MS} and nothing survives a restart, but it answers without a
- * round trip and holds plans that were never saved. The second is Dolt's
- * `research_plans` table (`lib/plans.ts`), consulted on a memory miss when
- * Dolt is configured, so a plan saved by field generation is found by an
- * enrichment run in another process, or after a restart. A saved plan found
- * there is put in memory for the rows that follow.
+ * round trip and holds plans that were never saved. The second is the saved
+ * plans in the app's libSQL database (`lib/plans.ts`), consulted on a memory
+ * miss, so a plan saved by field generation is found by an enrichment run in
+ * another process, or after a restart. A saved plan found there is put in
+ * memory for the rows that follow.
  *
  * A miss on both layers means "no plan", never an error; callers fall back to
- * planning without one. A Dolt failure counts as a miss too: an outage should
- * cost one planner call, not the run.
+ * planning without one. A database failure counts as a miss too: an outage
+ * should cost one planner call, not the run.
  */
-import { isDoltConfigured } from '@/lib/dolt';
 import { findPlanByFieldSet, type SavedPlan } from '@/lib/plans';
 
 import type { ResearchPlanType } from './schemas';
@@ -138,14 +137,11 @@ function cachedPlanForFields(wanted: readonly string[], now: number): ResolvedPl
 /**
  * The saved plan covering this field set, or `null` — the second layer.
  *
- * Only asked when Dolt is configured; a failure to reach it is logged and
- * reported as a miss (see the module comment). A hit is stored in memory
+ * A failure to reach the database is logged and reported as a miss (see the module comment). A hit is stored in memory
  * whole, under its own field set, so the next row's lookup is a memory hit
  * and so it is still found as a superset by a narrower request.
  */
 async function savedPlanForFields(wanted: readonly string[], now: number): Promise<ResolvedPlan | null> {
-  if (!isDoltConfigured()) return null;
-
   let saved: SavedPlan | null;
   try {
     saved = await findPlanByFieldSet(wanted);

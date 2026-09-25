@@ -2,10 +2,11 @@
  * Dolt connection for the app.
  *
  * Dolt speaks the MySQL wire protocol, so this is an ordinary `mysql2` pool.
- * What Dolt adds is {@link commit}: every write ends in a versioned commit, so
- * `dolt_log` answers "who changed this profile and when" and a bad write can be
- * rolled back rather than reconstructed. Data gets the same audit trail code
- * already gets from git.
+ * What Dolt adds is the versioned commit: each enrichment run lands as one
+ * commit (`lib/runs.ts`), `dolt_log` answers "what did this run write and
+ * when", and a bad write can be rolled back rather than reconstructed. Dolt
+ * holds the run history only; profiles and saved plans are in libSQL
+ * (`lib/app-db.ts`).
  *
  * Configuration comes from the environment, never from a checked-in file:
  *
@@ -123,11 +124,8 @@ export async function select<T = Record<string, unknown>>(
  * Tolerant on purpose: a column that already arrived parsed is passed through,
  * and a string that does not parse is left as-is rather than throwing, so one
  * malformed legacy row cannot take down a list endpoint.
- *
- * Exported for rows read on a dedicated {@link connect} connection, which
- * bypasses {@link select}.
  */
-export function parseJsonColumns<T extends Record<string, unknown>>(
+function parseJsonColumns<T extends Record<string, unknown>>(
   row: T,
   jsonColumns: readonly string[]
 ): T {
@@ -147,45 +145,6 @@ export function parseJsonColumns<T extends Record<string, unknown>>(
   }
 
   return parsed as T;
-}
-
-/**
- * Serialise a value bound for a JSON column.
- *
- * `mysql2` would send a plain object as `[object Object]`, so objects and arrays
- * are stringified here — the write-side counterpart of {@link parseJsonColumns}.
- * `null` and `undefined` become SQL NULL rather than the string `"null"`.
- */
-export function toJsonColumn(value: unknown): string | null {
-  if (value === null || value === undefined) return null;
-  return JSON.stringify(value);
-}
-
-/**
- * Stage every change and commit — `git commit` for the data. Returns the hash.
- *
- * `-Am` stages all tables and takes the message in one call. `--author` sets the
- * identity on the commit, which is what makes `dolt_log` and `dolt_blame`
- * readable afterwards; without it every commit is attributed to the server's
- * configured user.
- *
- * Returns `null` when there was nothing to commit. Dolt raises "nothing to
- * commit" as an error, but for a caller that has just run an idempotent
- * migration or a no-op update that is the expected outcome, not a failure — so
- * it is reported as a value and every other error still propagates.
- */
-export async function commit(message: string, author: string): Promise<string | null> {
-  try {
-    const result = await query<unknown>("CALL DOLT_COMMIT('-Am', ?, '--author', ?)", [
-      message,
-      author,
-    ]);
-
-    return readCommitHash(result);
-  } catch (error) {
-    if (isNothingToCommit(error)) return null;
-    throw error;
-  }
 }
 
 /**

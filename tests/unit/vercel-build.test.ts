@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { migrationPlan } from '@/scripts/vercel-build.mjs';
+import { libsqlPlan, migrationPlan } from '@/scripts/vercel-build.mjs';
 
 /** Which Vercel builds apply `db/schema.sql`. No build or database is involved. */
 const DOLT = { DOLT_HOST: 'dolt.example', DOLT_DATABASE: 'fire_enrich' };
@@ -76,6 +76,23 @@ describe('migrationPlan', () => {
   });
 });
 
+/** Which Vercel builds apply the app's libSQL schema: any with TURSO_DATABASE_URL. */
+describe('libsqlPlan', () => {
+  it('migrates on every environment when TURSO_DATABASE_URL is set', () => {
+    for (const VERCEL_ENV of ['production', 'preview', 'development', undefined]) {
+      expect(libsqlPlan({ VERCEL_ENV, TURSO_DATABASE_URL: 'libsql://db.example' }).migrate).toBe(true);
+    }
+  });
+
+  it('skips when TURSO_DATABASE_URL is unset, empty or whitespace', () => {
+    for (const TURSO_DATABASE_URL of [undefined, '', '  ']) {
+      const plan = libsqlPlan({ VERCEL_ENV: 'production', TURSO_DATABASE_URL });
+      expect(plan.migrate).toBe(false);
+      expect(plan.reason).toBe('TURSO_DATABASE_URL is not set');
+    }
+  });
+});
+
 /**
  * The script end to end, as Vercel runs it, in a child process. `next build`
  * is replaced by a stub: the script runs `npm_execpath run build` with this
@@ -87,6 +104,9 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
   const SCRIPT = fileURLToPath(new URL('../../scripts/vercel-build.mjs', import.meta.url));
   const BUILT = 'stub next build ran';
   const DOLT_ENV = ['DOLT_HOST', 'DOLT_PORT', 'DOLT_USER', 'DOLT_PASSWORD', 'DOLT_DATABASE', 'DOLT_TLS_CA_B64', 'DOLT_PREVIEW_MIGRATE'];
+  // Unset per build unless a test passes them: tests/setup.ts points
+  // TURSO_DATABASE_URL at the suite's own file.
+  const TURSO_ENV = ['TURSO_DATABASE_URL', 'TURSO_AUTH_TOKEN'];
   let dir: string;
   let stub: string;
 
@@ -100,7 +120,7 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
 
   function build(extra: Record<string, string>) {
     const env: NodeJS.ProcessEnv = { ...process.env };
-    for (const key of DOLT_ENV) delete env[key];
+    for (const key of [...DOLT_ENV, ...TURSO_ENV]) delete env[key];
     // Windows env names are case-insensitive, and the parent's copy may be
     // spelled differently; drop every spelling so the stub is the only one.
     for (const key of Object.keys(env)) if (key.toLowerCase() === 'npm_execpath') delete env[key];
@@ -117,6 +137,39 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(BUILT);
     expect(result.stdout).toContain('db:migrate skipped: Dolt is not configured (optional;');
+    expect(result.stdout).toContain('db:migrate:libsql skipped: TURSO_DATABASE_URL is not set.');
+  });
+
+  it('applies the libSQL schema when TURSO_DATABASE_URL is set, and a rebuild changes nothing', () => {
+    const turso = { VERCEL_ENV: 'production', TURSO_DATABASE_URL: `file:${join(dir, 'build.db')}` };
+
+    const first = build(turso);
+    expect(first.status).toBe(0);
+    expect(first.stdout).toContain(BUILT);
+    expect(first.stdout).toContain('db:migrate:libsql: TURSO_DATABASE_URL is set.');
+    expect(first.stdout).toContain('created index:idx_profiles_created_at');
+    expect(first.stdout).toContain('table:profiles');
+    expect(first.stdout).toContain('table:research_plans');
+
+    const second = build(turso);
+    expect(second.status).toBe(0);
+    expect(second.stdout).toContain('nothing changed.');
+  });
+
+  it('exits non-zero, before any Dolt migration, when the libSQL migration fails', () => {
+    // Port 1 on loopback: nothing listens, the connection is refused at once.
+    const result = build({
+      VERCEL_ENV: 'production',
+      TURSO_DATABASE_URL: 'http://127.0.0.1:1',
+      DOLT_HOST: '127.0.0.1',
+      DOLT_PORT: '1',
+      DOLT_DATABASE: 'fire_enrich',
+    });
+
+    expect(result.stdout).toContain(BUILT);
+    expect(result.stderr).toContain('libSQL migration failed.');
+    expect(result.stdout).not.toContain('db:migrate: production build.');
+    expect(result.status).toBe(1);
   });
 
   it('exits non-zero when Dolt is configured and the migration fails', () => {

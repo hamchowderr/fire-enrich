@@ -23,6 +23,14 @@ const user = process.env.DOLT_TEST_USER ?? 'root';
 const password = process.env.DOLT_TEST_PASSWORD ?? '';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/db-migrate.mjs', import.meta.url));
+
+/**
+ * Tables an older schema created that `db/schema.sql` no longer does:
+ * profiles and saved plans moved to libSQL. The migration leaves them in an
+ * upgraded database, unused (see the header of `db/schema.sql`), so they are
+ * the one expected difference from a fresh database.
+ */
+const RETIRED_TABLES = ['profiles', 'research_plans'];
 const FRESH = `fe_migrate_fresh_${process.pid}`;
 
 function migrate(target: string) {
@@ -40,6 +48,26 @@ function migrate(target: string) {
 }
 
 let connection: mysql.Connection;
+
+/** The retired tables present in `target`, with their row counts. */
+async function retiredRows(target: string): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const table of RETIRED_TABLES) {
+    const [found] = await connection.query<mysql.RowDataPacket[]>(
+      'SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+      [target, table]
+    );
+    if (found.length === 0) continue;
+    const [[{ n }]] = await connection.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM \`${target}\`.\`${table}\``
+    );
+    out[table] = Number(n);
+  }
+  return out;
+}
+
+/** Tables and row counts in the base database before this commit's migration. */
+let baseRows: Record<string, number> = {};
 
 async function head(target: string): Promise<string> {
   const [rows] = await connection.query<mysql.RowDataPacket[]>(
@@ -68,6 +96,7 @@ async function shape(target: string): Promise<Record<string, string>> {
 describe.skipIf(!host || !database)('db-migrate against a live Dolt server', { timeout: 60_000 }, () => {
   beforeAll(async () => {
     connection = await mysql.createConnection({ host, port, user, password });
+    baseRows = await retiredRows(database!);
   });
 
   afterAll(async () => {
@@ -93,10 +122,30 @@ describe.skipIf(!host || !database)('db-migrate against a live Dolt server', { t
     expect(status).toEqual([]);
   });
 
-  it('leaves the upgraded database the same shape as a fresh one', async () => {
+  it('leaves the upgraded database the same shape as a fresh one, retired tables aside', async () => {
     const fresh = migrate(FRESH);
     expect(fresh.status).toBe(0);
 
-    expect(await shape(database!)).toEqual(await shape(FRESH));
+    const upgraded = await shape(database!);
+    const built = await shape(FRESH);
+
+    for (const table of RETIRED_TABLES) {
+      expect(built).not.toHaveProperty(table);
+      delete upgraded[table];
+    }
+    expect(upgraded).toEqual(built);
+  });
+
+  it('leaves the retired tables of an older schema in place, rows and all', async () => {
+    expect(await retiredRows(database!)).toEqual(baseRows);
+  });
+
+  it('keeps no foreign key from runs to plans, so a run can name a plan saved in libSQL', async () => {
+    const [keys] = await connection.query<mysql.RowDataPacket[]>(
+      `SELECT CONSTRAINT_NAME FROM information_schema.REFERENTIAL_CONSTRAINTS
+        WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = 'enrichment_runs'`,
+      [database]
+    );
+    expect(keys).toEqual([]);
   });
 });

@@ -217,40 +217,19 @@ describe('query and select', () => {
   });
 });
 
-describe('JSON round-trip across the transport', () => {
+describe('JSON columns read across the transport', () => {
   beforeEach(() => {
     process.env.DOLT_HOST = '127.0.0.1';
     process.env.DOLT_DATABASE = 'fire_enrich';
   });
 
-  it('stringifies on write and reads back the same value', async () => {
+  it('parses a column the driver returned as a string', async () => {
     const fake = fakePool();
-    const { select, toJsonColumn } = await loadClient();
+    const value = { owner: 'sales', tags: ['inbound'], nested: { pipeline: 2 } };
+    fake.queue([{ crm_defaults: JSON.stringify(value) }]);
+    const { select } = await loadClient();
 
-    const value = {
-      audiences: ['founders', 'RevOps leads'],
-      default_field_hints: ['funding stage', 'hiring for sales'],
-      crm_defaults: { owner: 'sales', tags: ['inbound'], nested: { pipeline: 2 } },
-      models: { planner: 'anthropic/claude-sonnet-4.5' },
-    };
-
-    // What the client would send for each JSON column.
-    const written = Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, toJsonColumn(item)])
-    );
-    for (const column of Object.values(written)) expect(typeof column).toBe('string');
-
-    // The same strings coming back out of the driver.
-    fake.queue([written]);
-
-    expect((await select('SELECT 1', [], Object.keys(value)))[0]).toEqual(value);
-  });
-
-  it('writes null rather than the string "null" for an absent value', async () => {
-    const { toJsonColumn } = await loadClient();
-
-    expect(toJsonColumn(null)).toBeNull();
-    expect(toJsonColumn(undefined)).toBeNull();
+    expect(await select('SELECT 1', [], ['crm_defaults'])).toEqual([{ crm_defaults: value }]);
   });
 
   it('passes through a column the driver already parsed', async () => {
@@ -270,48 +249,19 @@ describe('JSON round-trip across the transport', () => {
   });
 });
 
-describe('commit', () => {
-  beforeEach(() => {
-    process.env.DOLT_HOST = '127.0.0.1';
-    process.env.DOLT_DATABASE = 'fire_enrich';
+describe('reading a DOLT_COMMIT result', () => {
+  it('unwraps the hash from a result set, or from one level flatter', async () => {
+    const { readCommitHash } = await loadClient();
+
+    expect(readCommitHash([[{ hash: 'abc123' }]])).toBe('abc123');
+    expect(readCommitHash([{ hash: 'def456' }])).toBe('def456');
+    expect(readCommitHash([])).toBeNull();
   });
 
-  it('calls DOLT_COMMIT with the message and author bound as parameters', async () => {
-    const fake = fakePool();
-    fake.queue([[{ hash: 'abc123' }]]);
-    const { commit } = await loadClient();
+  it('recognises "nothing to commit" and nothing else', async () => {
+    const { isNothingToCommit } = await loadClient();
 
-    const hash = await commit('Create profile p1 (Example Co)', 'Fire Enrich <fe@localhost>');
-
-    expect(fake.calls[0].sql).toBe("CALL DOLT_COMMIT('-Am', ?, '--author', ?)");
-    expect(fake.calls[0].params).toEqual([
-      'Create profile p1 (Example Co)',
-      'Fire Enrich <fe@localhost>',
-    ]);
-    expect(hash).toBe('abc123');
-  });
-
-  it('unwraps a hash the driver returned one level flatter', async () => {
-    const fake = fakePool();
-    fake.queue([{ hash: 'def456' }]);
-    const { commit } = await loadClient();
-
-    expect(await commit('m', 'a')).toBe('def456');
-  });
-
-  it('returns null when there was nothing to commit', async () => {
-    const fake = fakePool();
-    fake.query.mockRejectedValueOnce(new Error('nothing to commit'));
-    const { commit } = await loadClient();
-
-    expect(await commit('m', 'a')).toBeNull();
-  });
-
-  it('propagates any other failure', async () => {
-    const fake = fakePool();
-    fake.query.mockRejectedValueOnce(new Error('connection lost'));
-    const { commit } = await loadClient();
-
-    await expect(commit('m', 'a')).rejects.toThrow('connection lost');
+    expect(isNothingToCommit(new Error('nothing to commit'))).toBe(true);
+    expect(isNothingToCommit(new Error('connection lost'))).toBe(false);
   });
 });

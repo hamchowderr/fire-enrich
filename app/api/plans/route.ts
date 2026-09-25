@@ -1,11 +1,8 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { badRequest, notFound, parseJsonBody, requireDolt } from '@/lib/api/profiles-http';
+import { badRequest, notFound, parseJsonBody } from '@/lib/api/profiles-http';
 import { listPlans, PlanProfileMissingError, savePlan, savePlanSchema } from '@/lib/plans';
-
-/** Named in the 503 when Dolt is not configured. */
-const FEATURE = 'Saved plans';
 
 /**
  * The list is always per profile: a plan is meaningless without the profile it
@@ -16,9 +13,6 @@ const listQuerySchema = z.object({ profileId: z.string().trim().min(1) });
 
 /** `GET /api/plans?profileId=` → every plan saved for that profile, newest first. */
 export async function GET(request: NextRequest) {
-  const unconfigured = requireDolt(FEATURE);
-  if (unconfigured) return unconfigured;
-
   const parsed = listQuerySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));
   if (!parsed.success) return badRequest(parsed.error, 'query');
 
@@ -33,9 +27,6 @@ export async function GET(request: NextRequest) {
  * is what says so, at write time.
  */
 export async function POST(request: NextRequest) {
-  const unconfigured = requireDolt(FEATURE);
-  if (unconfigured) return unconfigured;
-
   const body = await parseJsonBody(request);
   if (body.error) return body.error;
 

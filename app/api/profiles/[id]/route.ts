@@ -6,7 +6,6 @@ import {
   conflict,
   notFound,
   parseJsonBody,
-  requireDolt,
 } from '@/lib/api/profiles-http';
 import {
   deleteProfile,
@@ -32,9 +31,6 @@ const putQuerySchema = z.object({ merge: z.enum(['true', 'false']).optional() })
 
 /** `GET /api/profiles/:id` */
 export async function GET(_request: NextRequest, context: RouteContext) {
-  const unconfigured = requireDolt();
-  if (unconfigured) return unconfigured;
-
   const { id } = await context.params;
   const profile = await getProfile(id);
 
@@ -60,20 +56,18 @@ export async function GET(_request: NextRequest, context: RouteContext) {
  * - `audiences` and `default_field_hints` are replaced as without the option.
  *
  * The merge cannot remove a key; send the column without `merge` to replace it.
- * The read, the merge and the write run in one transaction, so two concurrent
- * merges cannot drop each other's keys. A merge that collides with another
- * writer is retried from a fresh read. If it collides on every attempt, the
- * answer is a 409 with nothing written, and the client can repeat the request. The merged result is validated with the
+ * The read, the merge and the write run in one write transaction, so two
+ * concurrent merges cannot drop each other's keys. A merge that finds another
+ * writer holding the lock is retried from a fresh read. If it finds the lock
+ * held on every attempt, the answer is a 409 with nothing written, and the
+ * client can repeat the request. The merged result is validated with the
  * same schema as the body, and a result that fails is a 400 with nothing
- * written or committed. Any query parameter other than `merge` is a 400.
+ * written. Any query parameter other than `merge` is a 400.
  *
  * The option is a query parameter rather than a body field so the body stays
  * exactly the profile fields `updateProfileSchema` describes.
  */
 export async function PUT(request: NextRequest, context: RouteContext) {
-  const unconfigured = requireDolt();
-  if (unconfigured) return unconfigured;
-
   const { id } = await context.params;
 
   const query = putQuerySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));
@@ -101,9 +95,6 @@ export async function PUT(request: NextRequest, context: RouteContext) {
 
 /** `DELETE /api/profiles/:id` */
 export async function DELETE(_request: NextRequest, context: RouteContext) {
-  const unconfigured = requireDolt();
-  if (unconfigured) return unconfigured;
-
   const { id } = await context.params;
   const deleted = await deleteProfile(id);
 

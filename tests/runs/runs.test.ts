@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EnrichmentResult } from '@/lib/types';
 
+import plannerFixtures from '../../fixtures/planner-plan.json';
+import { useTempAppDb } from '../app-db/temp-db';
 import { configureDolt, installFakeDolt, isolateDoltEnv } from './fake-dolt';
 
 /**
@@ -85,7 +87,7 @@ describe('startRun', () => {
     expect(fake.find(/INSERT INTO enrichment_runs/)[0].params).toEqual([runId, null, 'emails:sha256:abc (2 rows)', 'running']);
   });
 
-  it('falls back to a null plan_id when the plan row is not on main', async () => {
+  it('falls back to a null plan_id on an unmigrated database whose foreign key rejects it', async () => {
     const { startRun } = await loadRuns();
     let first = true;
     fake.respond(/INSERT INTO enrichment_runs/, () => {
@@ -506,5 +508,44 @@ describe('listRefFor', () => {
     expect(listRefFor(undefined, rows, 'email')).toMatch(/^emails:sha256:[0-9a-f]{16} \(2 rows\)$/);
     expect(listRefFor(undefined, rows, 'email')).toBe(listRefFor('', [{ email: 'a@x.example' }, { email: 'b@y.example' }], 'email'));
     expect(listRefFor(undefined, [rows[0]], 'email')).not.toBe(listRefFor(undefined, rows, 'email'));
+  });
+});
+
+/**
+ * Saved plans live in libSQL and run history in Dolt. A run of a saved plan
+ * records that plan's id as a plain value: saved through `lib/plans.ts` into
+ * a real temporary libSQL file, then carried into the run row and the run's
+ * commit on the fake Dolt, with no foreign-key fallback involved.
+ */
+describe('a run of a plan saved in libSQL', () => {
+  let db: ReturnType<typeof useTempAppDb>;
+
+  beforeEach(() => {
+    db = useTempAppDb();
+  });
+
+  afterEach(() => db.cleanup());
+
+  it('records the saved plan id in the run row and the run commit', async () => {
+    const { createProfile } = await import('@/lib/profiles');
+    const { savePlan, getPlan } = await import('@/lib/plans');
+    const profile = await createProfile({ name: 'Example Co', business_summary: 's', offer: 'o' });
+    const saved = await savePlan({
+      profileId: profile.id,
+      goal: 'g',
+      plan: JSON.parse(plannerFixtures.fixtures[0].response.content),
+    });
+    const { finishRun, recordRow, startRun } = await loadRuns();
+
+    const runId = await startRun({ planId: saved.id, listRef: 'contacts.csv' });
+    await recordRow(runId, 'hello@firecrawl.dev', { headline: enrichment() });
+    await finishRun(runId, 'completed');
+
+    expect(fake.find(/INSERT INTO enrichment_runs/).map((statement) => statement.params[1])).toEqual([saved.id]);
+    const [runCommit] = fake.find(/DOLT_COMMIT/, branchOf(runId));
+    expect(runCommit.params[0]).toContain(`Plan-Id: ${saved.id}`);
+    expect(fake.find(/DOLT_MERGE/)).toHaveLength(1);
+    // The plan is still readable where it was saved; nothing in Dolt touched it.
+    expect(await getPlan(saved.id)).toEqual(saved);
   });
 });

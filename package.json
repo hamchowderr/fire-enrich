@@ -14,6 +14,7 @@
     "lint:mastra": "mastra lint --dir lib/mastra --strict",
     "typecheck": "tsc --noEmit",
     "db:migrate": "node scripts/db-migrate.mjs",
+    "db:migrate:libsql": "node scripts/libsql-migrate.mjs",
     "db:sweep-runs": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sweep-runs.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -30,6 +31,7 @@
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.88",
     "@ai-sdk/openai": "^4.0.72",
+    "@libsql/client": "^0.18.0",
     "@mastra/agent-browser": "^0.5.3",
     "@mastra/browser-firecrawl": "^0.2.3",
     "@mastra/core": "^1.71.0",

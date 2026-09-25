@@ -1,12 +1,22 @@
 #!/usr/bin/env node
 /**
- * The Vercel build: `next build`, then `db/schema.sql` applied to the
- * deployment's Dolt database when this environment owns one.
+ * The Vercel build: `next build`, then the app's libSQL schema applied to the
+ * deployment's Turso database, then `db/schema.sql` applied to its Dolt
+ * database when this environment owns one.
  *
  *   npm run build:vercel    # vercel.json "buildCommand"
  *
  * Vercel runs this instead of `npm run build`. Locally `npm run build` is still
  * plain `next build` and needs no database.
+ *
+ * libSQL (profiles and saved plans, `scripts/libsql-migrate.mjs`) is decided
+ * by {@link libsqlPlan}: it migrates on every environment whenever
+ * `TURSO_DATABASE_URL` is set. Its statements only create what is missing, so
+ * a Preview build that shares production's Turso database changes nothing
+ * there that production's own build would not. Without the variable the
+ * build skips it with one line: the app then uses the local file fallback,
+ * which it migrates itself, and which Vercel's read-only disk rejects at
+ * runtime with a message naming `TURSO_DATABASE_URL`.
  *
  * Dolt is optional (`doltConfigState()` in `lib/dolt-config.mjs`):
  *
@@ -48,6 +58,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DOLT_REQUIRED_VARS, doltConfigState, doltMisconfiguredMessage } from '../lib/dolt-config.mjs';
 
 const MIGRATE_SCRIPT = fileURLToPath(new URL('./db-migrate.mjs', import.meta.url));
+const LIBSQL_MIGRATE_SCRIPT = fileURLToPath(new URL('./libsql-migrate.mjs', import.meta.url));
+
+/**
+ * Decide whether this build applies the libSQL schema: whenever
+ * `TURSO_DATABASE_URL` is set to something other than whitespace.
+ *
+ * @param {Record<string, string | undefined>} env
+ * @returns {{ migrate: boolean, reason: string }}
+ */
+export function libsqlPlan(env) {
+  const url = env.TURSO_DATABASE_URL;
+  return typeof url === 'string' && url.trim() !== ''
+    ? { migrate: true, reason: 'TURSO_DATABASE_URL is set' }
+    : { migrate: false, reason: 'TURSO_DATABASE_URL is not set' };
+}
 
 /**
  * Decide whether this build applies migrations.
@@ -109,6 +134,16 @@ function main() {
   const npm = process.env.npm_execpath;
   if (npm) run(process.execPath, [npm, 'run', 'build']);
   else run('npm', ['run', 'build']);
+
+  // Before Dolt: profiles and plans are needed by every deployment, run
+  // history only by those with Dolt. A failure exits here, failing the build.
+  const libsql = libsqlPlan(process.env);
+  if (libsql.migrate) {
+    console.log(`db:migrate:libsql: ${libsql.reason}.`);
+    run(process.execPath, [LIBSQL_MIGRATE_SCRIPT]);
+  } else {
+    console.log(`db:migrate:libsql skipped: ${libsql.reason}.`);
+  }
 
   if (!plan.migrate) {
     console.log(`db:migrate skipped: ${plan.reason}.`);
