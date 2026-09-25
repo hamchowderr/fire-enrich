@@ -3,7 +3,7 @@
  * planner agent, answered by AIMock (`fixtures/plan-fallback.json`), then
  * reconciled with the requested fields and cached.
  *
- * Dolt is not configured here, so the planner plans for its generic profile;
+ * The test database holds no profiles, so the planner plans for its generic profile;
  * the fixture only matches that system prompt and a goal built from the field
  * definitions, so a pass also proves the goal reached the model.
  *

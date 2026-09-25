@@ -6,21 +6,15 @@ import {
   listProfiles,
   ProfileNameTakenError,
 } from '@/lib/profiles';
-import { badRequest, conflict, parseJsonBody, requireDolt } from '@/lib/api/profiles-http';
+import { badRequest, conflict, parseJsonBody } from '@/lib/api/profiles-http';
 
 /** `GET /api/profiles` → every profile, newest first. */
 export async function GET() {
-  const unconfigured = requireDolt();
-  if (unconfigured) return unconfigured;
-
   return NextResponse.json({ profiles: await listProfiles() });
 }
 
 /** `POST /api/profiles` → create one profile. */
 export async function POST(request: NextRequest) {
-  const unconfigured = requireDolt();
-  if (unconfigured) return unconfigured;
-
   const body = await parseJsonBody(request);
   if (body.error) return body.error;
 

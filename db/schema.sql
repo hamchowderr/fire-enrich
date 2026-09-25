@@ -17,88 +17,34 @@
 -- and a text id stays stable across a Dolt branch merge where two branches would
 -- otherwise both claim the same integer.
 --
--- The chain is: a profile describes a business → a research plan is made for that
--- profile → an enrichment run executes that plan over a contact list → each run
--- produces enrichments (one field value per contact) → each enrichment cites
--- evidence. Foreign keys are declared with ON DELETE CASCADE so deleting a
--- profile takes its plans with it; Dolt enforces them like MySQL. The one
--- exception is the run → plan link, which is ON DELETE SET NULL: a run is a
--- record of work done and results found, and deleting the plan it followed
--- (or the profile above it) must not erase that record. See `enrichment_runs`.
-
--- A business profile: who the business is, what it sells, who it sells to, and
--- the defaults the planner should assume when the operator does not say
--- otherwise. This is the first-class input the planner reads — not prompt text
--- pasted into a request.
-CREATE TABLE IF NOT EXISTS profiles (
-  -- nanoid; see the note above on why this is not AUTO_INCREMENT.
-  id VARCHAR(32) NOT NULL,
-  -- Operator-facing label, unique so two profiles cannot be confused in a picker.
-  name VARCHAR(255) NOT NULL,
-  -- Prose: what the business does. Read by the planner, so it is long-form text
-  -- rather than a constrained column.
-  business_summary TEXT NOT NULL,
-  -- Prose: what the business actually sells, in its own words.
-  offer TEXT NOT NULL,
-  -- JSON array of strings: the audiences this business sells to.
-  audiences JSON NOT NULL,
-  -- JSON array of strings: default enrichment fields to look for, in operator
-  -- language ("funding stage", "hiring for sales"). The planner turns these into
-  -- a concrete plan; they are hints, not a schema.
-  default_field_hints JSON NOT NULL,
-  -- JSON object: CRM-side defaults (owner, pipeline, tags…). Shape is owned by
-  -- the CRM integration, so this column stays an open object on purpose.
-  crm_defaults JSON NOT NULL,
-  -- JSON object keyed by model role (planner/research/chat) holding gateway model
-  -- ids. Partial by design: a key that is absent falls back to DEFAULT_MODEL_IDS
-  -- in lib/mastra/models.ts, so a profile only records where it disagrees with
-  -- the code default.
-  models JSON NOT NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uq_profiles_name (name)
-);
-
--- Indexed because the profile list is sorted newest-first.
-CREATE INDEX IF NOT EXISTS idx_profiles_created_at ON profiles (created_at);
-
--- A research plan the planner produced for one profile: the goal and audience it
--- was asked about, and the plan itself.
-CREATE TABLE IF NOT EXISTS research_plans (
-  id VARCHAR(32) NOT NULL,
-  profile_id VARCHAR(32) NOT NULL,
-  -- What the operator asked for in their own words.
-  goal TEXT NOT NULL,
-  -- Which of the profile's audiences this plan targets. Nullable: a plan may be
-  -- audience-agnostic.
-  audience VARCHAR(255) NULL,
-  -- JSON object: the planner's output (fields to resolve, strategies, order).
-  -- Shape is owned by the planner and will change as it improves, so the column
-  -- stays an open object rather than a set of columns that would need a
-  -- migration per planner revision.
-  -- Backticked because `plan` is a reserved word in Dolt's parser; it is the
-  -- only identifier in this file that needs quoting.
-  `plan` JSON NOT NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  CONSTRAINT fk_research_plans_profile
-    FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE
-);
-
--- Lookup column: "every plan for this profile".
-CREATE INDEX IF NOT EXISTS idx_research_plans_profile_id ON research_plans (profile_id);
-CREATE INDEX IF NOT EXISTS idx_research_plans_created_at ON research_plans (created_at);
+-- This database holds the versioned run history and nothing else: an
+-- enrichment run over a contact list → its enrichments (one field value per
+-- contact) → the evidence each enrichment cites. Foreign keys are declared
+-- with ON DELETE CASCADE down that chain; Dolt enforces them like MySQL.
+--
+-- Business profiles and saved research plans live in the app's libSQL
+-- database (Turso, or the local file), not here: see `lib/app-db-schema.mjs`.
+-- A run names the plan it followed by `plan_id`, a plain value with no
+-- foreign key, because the plan row is in the other database.
+--
+-- A database created before that move still holds `profiles` and
+-- `research_plans` tables. This file leaves them as they are: nothing reads
+-- or writes them any more, and dropping a table in the release that stops
+-- using it would break the previous deployment, which still serves traffic
+-- while this migration runs (see "Database migrations" in CLAUDE.md). Drop
+-- them by hand, or in a later release, once no deployment older than the move
+-- is live. The one change made to them is indirect: the foreign key from
+-- `enrichment_runs` to `research_plans` is dropped below.
 
 -- One execution of a plan over one contact list.
 CREATE TABLE IF NOT EXISTS enrichment_runs (
   id VARCHAR(32) NOT NULL,
-  -- Nullable for two reasons. A run may follow a plan that was never saved
-  -- (one the planner wrote for a hand-typed field set and that only lived in
-  -- the process cache), so it has no plan row to point at. And when a saved
-  -- plan is deleted, the runs that followed it stay and this column is set to
-  -- NULL: the run and its enrichments are the record of what was found, and
-  -- that record outlives the plan that produced it.
+  -- The id of the saved plan the run followed, in the app's libSQL database
+  -- (`research_plans`). A plain value: no foreign key can cross databases, so
+  -- a run keeps the id of a plan deleted later, and the run and its
+  -- enrichments stay the record of what was found. NULL for a plan that was
+  -- never saved (one the planner wrote for a hand-typed field set and that
+  -- only lived in the process cache).
   plan_id VARCHAR(32) NULL,
   -- How to find the input list (an uploaded CSV name, a stored list id). Kept as
   -- an opaque reference so the run row does not depend on where lists live.
@@ -116,32 +62,30 @@ CREATE TABLE IF NOT EXISTS enrichment_runs (
   -- The Dolt commit this run's enrichments landed in, so a result set can be
   -- read back exactly as it was written (`AS OF <hash>`). NULL until committed.
   commit_hash VARCHAR(64) NULL,
-  PRIMARY KEY (id),
-  CONSTRAINT fk_enrichment_runs_plan
-    FOREIGN KEY (plan_id) REFERENCES research_plans (id) ON DELETE SET NULL
+  PRIMARY KEY (id)
 );
 
--- Migration for a database created when `fk_enrichment_runs_plan` was still
--- ON DELETE CASCADE and `plan_id` NOT NULL. Re-runnable: the drop only runs
--- while the CASCADE version is present, the add only runs while no constraint
--- of that name exists, and MODIFY to the same definition is a no-op. On a fresh
--- database the CREATE TABLE above already has the final shape, so every branch
--- here chooses `SELECT 1` and `dolt_status` stays clean.
+-- Migration for a database created while profiles and plans were in Dolt,
+-- when `enrichment_runs.plan_id` referenced `research_plans` through
+-- `fk_enrichment_runs_plan` (ON DELETE CASCADE in the oldest databases, ON
+-- DELETE SET NULL later). Saved plans now live in libSQL, so that key would
+-- reject every run of a saved plan; it is dropped whatever its rule. `plan_id`
+-- keeps its index, `idx_enrichment_runs_plan_id` below. Relaxing a constraint
+-- is backwards-compatible: the previous deployment's writes still succeed.
 --
--- Dolt (2.1) has no `DROP FOREIGN KEY IF EXISTS`, and a duplicate constraint
--- name is an error, so the choice is made by reading `information_schema` and
--- executing the resulting statement as a prepared one. `@fe_*` names are
--- session variables; the migration script runs the whole file on one
--- connection, so they survive from SET to PREPARE.
-SET @fe_drop_runs_fk = (SELECT IF(COUNT(*) > 0, 'ALTER TABLE enrichment_runs DROP FOREIGN KEY fk_enrichment_runs_plan', 'SELECT 1') FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'enrichment_runs' AND CONSTRAINT_NAME = 'fk_enrichment_runs_plan' AND DELETE_RULE = 'CASCADE');
+-- Dolt (2.3) has no `DROP FOREIGN KEY IF EXISTS`, so the choice is made by
+-- reading `information_schema` and executing the resulting statement as a
+-- prepared one: the drop runs only while the constraint exists, and on a
+-- fresh or already migrated database it is `SELECT 1` and `dolt_status`
+-- stays clean. `@fe_*` names are session variables; the migration script runs
+-- the whole file on one connection, so they survive from SET to PREPARE.
+-- MODIFY to the same definition is a no-op; it stays for a database from
+-- before `plan_id` was nullable.
+SET @fe_drop_runs_fk = (SELECT IF(COUNT(*) > 0, 'ALTER TABLE enrichment_runs DROP FOREIGN KEY fk_enrichment_runs_plan', 'SELECT 1') FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'enrichment_runs' AND CONSTRAINT_NAME = 'fk_enrichment_runs_plan');
 PREPARE fe_drop_runs_fk FROM @fe_drop_runs_fk;
 EXECUTE fe_drop_runs_fk;
 DEALLOCATE PREPARE fe_drop_runs_fk;
 ALTER TABLE enrichment_runs MODIFY plan_id VARCHAR(32) NULL;
-SET @fe_add_runs_fk = (SELECT IF(COUNT(*) = 0, 'ALTER TABLE enrichment_runs ADD CONSTRAINT fk_enrichment_runs_plan FOREIGN KEY (plan_id) REFERENCES research_plans (id) ON DELETE SET NULL', 'SELECT 1') FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'enrichment_runs' AND CONSTRAINT_NAME = 'fk_enrichment_runs_plan');
-PREPARE fe_add_runs_fk FROM @fe_add_runs_fk;
-EXECUTE fe_add_runs_fk;
-DEALLOCATE PREPARE fe_add_runs_fk;
 
 -- Migration for a database created before `last_activity_at`. Dolt (2.1) has
 -- no `ADD COLUMN IF NOT EXISTS`, so, as above, `information_schema` decides:

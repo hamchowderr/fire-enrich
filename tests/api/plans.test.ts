@@ -2,67 +2,45 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import plannerFixtures from '../../fixtures/planner-plan.json';
+import { useTempAppDb } from '../app-db/temp-db';
+import { isolateDoltEnv } from '../runs/fake-dolt';
 
 /**
- * The saved-plans routes and data layer with `mysql2` mocked out.
+ * The saved-plans routes and data layer against a real libSQL file, one per
+ * test, with no Dolt configured: saved plans live in the app's libSQL
+ * database next to profiles.
  *
  * The handlers are called directly with a `NextRequest`, as the profiles route
  * tests do: what is under test is status codes and bodies — 400 with the
- * validation issues, 404 for an unknown plan or profile, 503 when Dolt is not
- * configured — that every write ends in exactly one Dolt commit, that a delete
- * touches the plan row and nothing else, and the SQL behind the field-set
- * lookup.
+ * validation issues, 404 for an unknown plan or profile — that a delete
+ * removes the plan row and nothing else, and the field-set lookup behind plan
+ * reuse.
  */
-const createPool = vi.fn();
-
-vi.mock('mysql2/promise', () => ({ default: { createPool } }));
-
-const DOLT_ENV = ['DOLT_HOST', 'DOLT_PORT', 'DOLT_USER', 'DOLT_PASSWORD', 'DOLT_DATABASE'] as const;
-const saved: Partial<Record<(typeof DOLT_ENV)[number], string | undefined>> = {};
+let db: ReturnType<typeof useTempAppDb>;
+let restoreDolt: () => void;
 
 /** The planner fixture's plan: a real `ResearchPlan`, for a fictional profile. */
 const PLAN = JSON.parse(plannerFixtures.fixtures[0].response.content);
 
-function fakePool() {
-  const calls: Array<{ sql: string; params: unknown[] }> = [];
-  const results: unknown[] = [];
+beforeEach(() => {
+  restoreDolt = isolateDoltEnv();
+  db = useTempAppDb();
+});
 
-  const pool = {
-    calls,
-    queue: (...items: unknown[]) => results.push(...items),
-    end: vi.fn(async () => {}),
-    query: vi.fn(async (sql: string, params: unknown[] = []) => {
-      calls.push({ sql, params });
-      const next = results.shift();
-      // A queued Error means "this call fails", so a test can put a driver
-      // failure at any position in a multi-statement path.
-      if (next instanceof Error) throw next;
-      return [next ?? [], []];
-    }),
-  };
-
-  createPool.mockReturnValue(pool);
-  return pool;
-}
-
-/** What `mysql2` throws when an insert names a profile that does not exist. */
-function missingProfileError() {
-  return Object.assign(
-    new Error(
-      'cannot add or update a child row - Foreign key violation on fk: `fk_research_plans_profile`, table: `research_plans`, referenced table: `profiles`, key: `[nope]`'
-    ),
-    { code: 'ER_NO_REFERENCED_ROW_2', errno: 1452 }
-  );
-}
+afterEach(() => {
+  db.cleanup();
+  restoreDolt();
+});
 
 async function loadRoutes() {
   vi.resetModules();
-  const [collection, item, plans] = await Promise.all([
+  const [collection, item, plans, profiles] = await Promise.all([
     import('@/app/api/plans/route'),
     import('@/app/api/plans/[id]/route'),
     import('@/lib/plans'),
+    import('@/lib/profiles'),
   ]);
-  return { collection, item, plans };
+  return { collection, item, plans, profiles };
 }
 
 function list(query = '') {
@@ -90,334 +68,235 @@ function context(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
-/** A stored row as the driver hands it back: the JSON column is a string. */
-function storedRow(overrides: Record<string, unknown> = {}) {
+/** A profile to save plans under; returns its id. */
+async function profileId(name = 'Example Co'): Promise<string> {
+  const { profiles } = await loadRoutes();
+  const profile = await profiles.createProfile({ name, business_summary: 's', offer: 'o' });
+  return profile.id;
+}
+
+/** A plan whose fields are exactly `names`, grouped in one group. */
+function planWith(names: string[]) {
+  const [template] = PLAN.fields;
+  const [group] = PLAN.groups;
   return {
-    id: 'plan-1',
-    profile_id: 'p1',
-    goal: 'Find companies with a small support team',
-    audience: null,
-    plan: JSON.stringify(PLAN),
-    created_at: '2026-01-01 00:00:00',
-    ...overrides,
+    ...PLAN,
+    fields: names.map((name) => ({ ...template, name, displayName: name })),
+    groups: [{ ...group, fieldNames: names }],
   };
 }
 
-const VALID_BODY = {
-  profileId: 'p1',
-  goal: 'Find companies with a small support team',
-  audience: 'Support leads',
-  plan: PLAN,
-};
-
-/** Every DOLT_COMMIT the handler made, in order. */
-function commits(fake: ReturnType<typeof fakePool>) {
-  return fake.calls.filter((call) => call.sql.includes('DOLT_COMMIT'));
+function body(id: string, overrides: Record<string, unknown> = {}) {
+  return { profileId: id, goal: 'Find companies with a small support team', audience: 'Support leads', plan: PLAN, ...overrides };
 }
 
-/** Every statement that names a table other than `research_plans`. */
-function otherTables(fake: ReturnType<typeof fakePool>) {
-  return fake.calls.filter((call) => /enrichment_runs|enrichments|evidence|profiles/.test(call.sql));
-}
+describe('GET /api/plans', () => {
+  it("returns the profile's plans newest first, with the plan parsed", async () => {
+    const id = await profileId();
+    const { collection, plans } = await loadRoutes();
+    const first = await plans.savePlan(body(id));
+    const second = await plans.savePlan(body(id, { goal: 'Another goal' }));
+    await plans.savePlan(body(await profileId('Other Co')));
 
-beforeEach(() => {
-  for (const key of DOLT_ENV) saved[key] = process.env[key];
-  createPool.mockReset();
-});
+    const response = await collection.GET(list(`?profileId=${id}`));
+    const json = await response.json();
 
-afterEach(() => {
-  for (const key of DOLT_ENV) {
-    if (saved[key] === undefined) delete process.env[key];
-    else process.env[key] = saved[key];
-  }
-});
-
-describe('with Dolt not configured', () => {
-  beforeEach(() => {
-    for (const key of DOLT_ENV) delete process.env[key];
+    expect(response.status).toBe(200);
+    const expected = [first, second].sort((a, b) =>
+      a.created_at === b.created_at ? (a.id < b.id ? 1 : -1) : a.created_at < b.created_at ? 1 : -1
+    );
+    expect(json.plans.map((plan: { id: string }) => plan.id)).toEqual(expected.map((plan) => plan.id));
+    expect(json.plans[0].plan).toEqual(PLAN);
+    expect(plans.savedPlanSchema.parse(json.plans[0])).toEqual(json.plans[0]);
   });
 
-  it('answers 503 on every handler, without trying to connect', async () => {
-    const { collection, item } = await loadRoutes();
-
-    const responses = await Promise.all([
-      collection.GET(list('?profileId=p1')),
-      collection.POST(post(VALID_BODY)),
-      item.GET(get('plan-1'), context('plan-1')),
-      item.DELETE(del('plan-1'), context('plan-1')),
-    ]);
-
-    for (const response of responses) expect(response.status).toBe(503);
-    expect(createPool).not.toHaveBeenCalled();
-  });
-
-  it('names the feature and the variables to set so the 503 is actionable', async () => {
+  it('returns an empty list rather than 404 when the profile has no plans', async () => {
     const { collection } = await loadRoutes();
 
-    const body = await (await collection.GET(list('?profileId=p1'))).json();
+    const response = await collection.GET(list('?profileId=p1'));
 
-    expect(body.error).toMatch(/^Saved plans need/);
-    expect(body.error).toContain('DOLT_HOST');
-    expect(body.error).toContain('DOLT_DATABASE');
+    expect(response.status).toBe(200);
+    expect((await response.json()).plans).toEqual([]);
+  });
+
+  it('answers 400 naming profileId when the query has none', async () => {
+    const { collection } = await loadRoutes();
+
+    const response = await collection.GET(list());
+    const json = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(json.error).toBe('Invalid query');
+    expect(json.issues.map((issue: { path: string[] }) => issue.path.join('.'))).toContain('profileId');
   });
 });
 
-describe('with Dolt configured', () => {
-  beforeEach(() => {
-    process.env.DOLT_HOST = '127.0.0.1';
-    process.env.DOLT_DATABASE = 'fire_enrich';
+describe('POST /api/plans', () => {
+  it('saves the plan whole and answers 201', async () => {
+    const id = await profileId();
+    const { collection, plans } = await loadRoutes();
+
+    const response = await collection.POST(post(body(id)));
+    const json = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(json.plan).toMatchObject({ profile_id: id, audience: 'Support leads', plan: PLAN });
+    expect(plans.savedPlanSchema.parse(json.plan)).toEqual(json.plan);
+    expect(await plans.getPlan(json.plan.id)).toEqual(json.plan);
   });
 
-  describe('GET /api/plans', () => {
-    it("returns the profile's plans newest first, with the plan parsed", async () => {
-      const fake = fakePool();
-      fake.queue([storedRow(), storedRow({ id: 'plan-2' })]);
-      const { collection, plans } = await loadRoutes();
+  it('stores a missing audience as NULL', async () => {
+    const id = await profileId();
+    const { collection } = await loadRoutes();
 
-      const response = await collection.GET(list('?profileId=p1'));
-      const body = await response.json();
+    const { audience: _omitted, ...rest } = body(id);
+    const response = await collection.POST(post(rest));
 
-      expect(response.status).toBe(200);
-      expect(body.plans.map((plan: { id: string }) => plan.id)).toEqual(['plan-1', 'plan-2']);
-      expect(body.plans[0].plan).toEqual(PLAN);
-      expect(plans.savedPlanSchema.parse(body.plans[0])).toEqual(body.plans[0]);
-
-      expect(fake.calls[0].sql).toContain('WHERE profile_id = ?');
-      expect(fake.calls[0].sql).toContain('ORDER BY created_at DESC');
-      expect(fake.calls[0].params).toEqual(['p1']);
-    });
-
-    it('returns an empty list rather than 404 when the profile has no plans', async () => {
-      const fake = fakePool();
-      fake.queue([]);
-      const { collection } = await loadRoutes();
-
-      const response = await collection.GET(list('?profileId=p1'));
-
-      expect(response.status).toBe(200);
-      expect((await response.json()).plans).toEqual([]);
-    });
-
-    it('answers 400 naming profileId when the query has none, and reads nothing', async () => {
-      const fake = fakePool();
-      const { collection } = await loadRoutes();
-
-      const response = await collection.GET(list());
-      const body = await response.json();
-
-      expect(response.status).toBe(400);
-      expect(body.error).toBe('Invalid query');
-      expect(body.issues.map((issue: { path: string[] }) => issue.path.join('.'))).toContain(
-        'profileId'
-      );
-      expect(fake.calls).toHaveLength(0);
-    });
+    expect(response.status).toBe(201);
+    expect((await response.json()).plan.audience).toBeNull();
   });
 
-  describe('POST /api/plans', () => {
-    it('saves the plan whole, commits once, and answers 201', async () => {
-      const fake = fakePool();
-      // insert, DOLT_COMMIT, read-back
-      fake.queue({ affectedRows: 1 }, [[{ hash: 'abc123' }]], [storedRow({ audience: 'Support leads' })]);
-      const { collection, plans } = await loadRoutes();
+  it('answers 400 with the issues when the plan is not a research plan, writing nothing', async () => {
+    const id = await profileId();
+    const { collection, plans } = await loadRoutes();
 
-      const response = await collection.POST(post(VALID_BODY));
-      const body = await response.json();
+    const response = await collection.POST(
+      post(body(id, { plan: { fields: [], groups: [], interpretation: 'x' } }))
+    );
+    const json = await response.json();
 
-      expect(response.status).toBe(201);
-      expect(body.plan.id).toBe('plan-1');
-      expect(body.plan.plan).toEqual(PLAN);
-      expect(plans.savedPlanSchema.parse(body.plan)).toEqual(body.plan);
-
-      const [insert] = fake.calls;
-      expect(insert.sql).toContain('INSERT INTO research_plans');
-      const [id, profileId, goal, audience, plan] = insert.params;
-      expect(typeof id).toBe('string');
-      expect(profileId).toBe('p1');
-      expect(goal).toBe(VALID_BODY.goal);
-      expect(audience).toBe('Support leads');
-      expect(plan).toBe(JSON.stringify(PLAN));
-
-      const committed = commits(fake);
-      expect(committed).toHaveLength(1);
-      expect(committed[0].params[0]).toBe(`Save plan ${id} for profile p1`);
-    });
-
-    it('stores a missing audience as NULL', async () => {
-      const fake = fakePool();
-      fake.queue({ affectedRows: 1 }, [[{ hash: 'abc' }]], [storedRow()]);
-      const { collection } = await loadRoutes();
-
-      const { audience: _omitted, ...body } = VALID_BODY;
-      const response = await collection.POST(post(body));
-
-      expect(response.status).toBe(201);
-      expect(fake.calls[0].params[3]).toBeNull();
-      expect((await response.json()).plan.audience).toBeNull();
-    });
-
-    it('answers 400 with the issues when the plan is not a research plan, writing nothing', async () => {
-      const fake = fakePool();
-      const { collection } = await loadRoutes();
-
-      const response = await collection.POST(
-        post({ ...VALID_BODY, plan: { fields: [], groups: [], interpretation: 'x' } })
-      );
-      const body = await response.json();
-
-      expect(response.status).toBe(400);
-      expect(body.error).toBe('Invalid plan');
-      expect(body.issues.map((issue: { path: string[] }) => issue.path.join('.'))).toContain(
-        'plan.fields'
-      );
-      expect(fake.calls).toHaveLength(0);
-    });
-
-    it('answers 400 when the profile id is missing', async () => {
-      fakePool();
-      const { collection } = await loadRoutes();
-
-      const { profileId: _omitted, ...body } = VALID_BODY;
-      const response = await collection.POST(post(body));
-
-      expect(response.status).toBe(400);
-      expect(
-        (await response.json()).issues.map((issue: { path: string[] }) => issue.path.join('.'))
-      ).toContain('profileId');
-    });
-
-    it('answers 400 for a body that is not JSON', async () => {
-      fakePool();
-      const { collection } = await loadRoutes();
-
-      const response = await collection.POST(post('not json', 'text/plain'));
-
-      expect(response.status).toBe(400);
-      expect((await response.json()).error).toMatch(/JSON/);
-    });
-
-    it('answers 404 naming the profile when it does not exist, without committing', async () => {
-      const fake = fakePool();
-      fake.queue(missingProfileError());
-      const { collection } = await loadRoutes();
-
-      const response = await collection.POST(post({ ...VALID_BODY, profileId: 'nope' }));
-      const body = await response.json();
-
-      expect(response.status).toBe(404);
-      expect(body.error).toBe('No profile with id nope');
-      expect(commits(fake)).toHaveLength(0);
-    });
-
-    it('lets a non-reference driver failure surface rather than reading as 404', async () => {
-      const fake = fakePool();
-      fake.queue(Object.assign(new Error('connection lost'), { code: 'PROTOCOL_CONNECTION_LOST' }));
-      const { collection } = await loadRoutes();
-
-      await expect(collection.POST(post(VALID_BODY))).rejects.toThrow('connection lost');
-    });
+    expect(response.status).toBe(400);
+    expect(json.error).toBe('Invalid plan');
+    expect(json.issues.map((issue: { path: string[] }) => issue.path.join('.'))).toContain('plan.fields');
+    expect(await plans.listPlans(id)).toEqual([]);
   });
 
-  describe('GET /api/plans/:id', () => {
-    it('returns the plan with its JSON parsed', async () => {
-      const fake = fakePool();
-      fake.queue([storedRow()]);
-      const { item, plans } = await loadRoutes();
+  it('answers 400 when the profile id is missing', async () => {
+    const { collection } = await loadRoutes();
 
-      const response = await item.GET(get('plan-1'), context('plan-1'));
-      const body = await response.json();
+    const { profileId: _omitted, ...rest } = body('p1');
+    const response = await collection.POST(post(rest));
 
-      expect(response.status).toBe(200);
-      expect(body.plan.id).toBe('plan-1');
-      expect(body.plan.plan).toEqual(PLAN);
-      expect(plans.savedPlanSchema.parse(body.plan)).toEqual(body.plan);
-      expect(fake.calls[0].sql).toContain('WHERE id = ?');
-      expect(fake.calls[0].params).toEqual(['plan-1']);
-    });
-
-    it('answers 404 naming the id when it is unknown', async () => {
-      const fake = fakePool();
-      fake.queue([]);
-      const { item } = await loadRoutes();
-
-      const response = await item.GET(get('missing'), context('missing'));
-
-      expect(response.status).toBe(404);
-      expect((await response.json()).error).toBe('No plan with id missing');
-    });
+    expect(response.status).toBe(400);
+    expect(
+      (await response.json()).issues.map((issue: { path: string[] }) => issue.path.join('.'))
+    ).toContain('profileId');
   });
 
-  describe('DELETE /api/plans/:id', () => {
-    it('deletes the plan row only, commits once, and answers 200', async () => {
-      const fake = fakePool();
-      // existence read, delete, DOLT_COMMIT
-      fake.queue([storedRow()], { affectedRows: 1 }, [[{ hash: 'abc' }]]);
-      const { item } = await loadRoutes();
+  it('answers 400 for a body that is not JSON', async () => {
+    const { collection } = await loadRoutes();
 
-      const response = await item.DELETE(del('plan-1'), context('plan-1'));
+    const response = await collection.POST(post('not json', 'text/plain'));
 
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ id: 'plan-1', deleted: true });
-
-      const deletes = fake.calls.filter((call) => /^DELETE/i.test(call.sql));
-      expect(deletes).toHaveLength(1);
-      expect(deletes[0].sql).toBe('DELETE FROM research_plans WHERE id = ?');
-      expect(deletes[0].params).toEqual(['plan-1']);
-      // Runs that followed the plan are the database's business (ON DELETE
-      // SET NULL); nothing here reads or writes them.
-      expect(otherTables(fake)).toEqual([]);
-
-      const committed = commits(fake);
-      expect(committed).toHaveLength(1);
-      expect(committed[0].params[0]).toBe('Delete plan plan-1');
-    });
-
-    it('answers 404 without deleting or committing when the plan is missing', async () => {
-      const fake = fakePool();
-      fake.queue([]);
-      const { item } = await loadRoutes();
-
-      const response = await item.DELETE(del('missing'), context('missing'));
-
-      expect(response.status).toBe(404);
-      expect(fake.calls).toHaveLength(1);
-      expect(fake.calls[0].sql).toMatch(/^SELECT/);
-      expect(commits(fake)).toHaveLength(0);
-    });
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toMatch(/JSON/);
   });
 
-  describe('findPlanByFieldSet', () => {
-    it('asks for the smallest, newest covering plan in one query, names deduplicated', async () => {
-      const fake = fakePool();
-      fake.queue([storedRow()]);
-      const { plans } = await loadRoutes();
+  it('answers 404 naming the profile when it does not exist, saving nothing', async () => {
+    const { collection, plans } = await loadRoutes();
 
-      const found = await plans.findPlanByFieldSet(['support_channels', 'help_desk_tool', 'support_channels']);
+    const response = await collection.POST(post(body('nope')));
 
-      expect(found?.id).toBe('plan-1');
-      expect(found?.plan).toEqual(PLAN);
-      expect(fake.calls).toHaveLength(1);
-      const { sql, params } = fake.calls[0];
-      expect(sql).toContain("JSON_CONTAINS(JSON_EXTRACT(`plan`, '$.fields[*].name'), CAST(? AS JSON))");
-      expect(sql).toContain("ORDER BY JSON_LENGTH(JSON_EXTRACT(`plan`, '$.fields')) ASC, created_at DESC");
-      expect(sql).toContain('LIMIT 1');
-      expect(params).toEqual(['["support_channels","help_desk_tool"]']);
-    });
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toBe('No profile with id nope');
+    expect(await plans.listPlans('nope')).toEqual([]);
+  });
+});
 
-    it('returns null when no saved plan covers the names', async () => {
-      const fake = fakePool();
-      fake.queue([]);
-      const { plans } = await loadRoutes();
+describe('GET /api/plans/:id', () => {
+  it('returns the plan with its JSON parsed', async () => {
+    const id = await profileId();
+    const { item, plans } = await loadRoutes();
+    const saved = await plans.savePlan(body(id));
 
-      expect(await plans.findPlanByFieldSet(['nothing_planned'])).toBeNull();
-    });
+    const response = await item.GET(get(saved.id), context(saved.id));
+    const json = await response.json();
 
-    it('returns null without a query for an empty set', async () => {
-      const fake = fakePool();
-      const { plans } = await loadRoutes();
+    expect(response.status).toBe(200);
+    expect(json.plan).toEqual(saved);
+    expect(json.plan.plan).toEqual(PLAN);
+  });
 
-      expect(await plans.findPlanByFieldSet([])).toBeNull();
-      expect(fake.calls).toHaveLength(0);
-    });
+  it('answers 404 naming the id when it is unknown', async () => {
+    const { item } = await loadRoutes();
+
+    const response = await item.GET(get('missing'), context('missing'));
+
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toBe('No plan with id missing');
+  });
+});
+
+describe('DELETE /api/plans/:id', () => {
+  it('deletes the plan row only and answers 200', async () => {
+    const id = await profileId();
+    const { item, plans, profiles } = await loadRoutes();
+    const doomed = await plans.savePlan(body(id));
+    const kept = await plans.savePlan(body(id, { goal: 'Keep me' }));
+
+    const response = await item.DELETE(del(doomed.id), context(doomed.id));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ id: doomed.id, deleted: true });
+    expect(await plans.getPlan(doomed.id)).toBeNull();
+    expect(await plans.getPlan(kept.id)).toEqual(kept);
+    expect(await profiles.getProfile(id)).not.toBeNull();
+  });
+
+  it('answers 404 when the plan is missing', async () => {
+    const { item } = await loadRoutes();
+
+    const response = await item.DELETE(del('missing'), context('missing'));
+
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('findPlanByFieldSet', () => {
+  it('finds the exact field set in any order, names deduplicated', async () => {
+    const id = await profileId();
+    const { plans } = await loadRoutes();
+    const saved = await plans.savePlan(body(id, { plan: planWith(['a', 'b']) }));
+
+    const found = await plans.findPlanByFieldSet(['b', 'a', 'b']);
+
+    expect(found).toEqual(saved);
+  });
+
+  it('prefers the smallest covering plan, then the newest', async () => {
+    const id = await profileId();
+    const { plans } = await loadRoutes();
+    await plans.savePlan(body(id, { plan: planWith(['a', 'b', 'c', 'd']) }));
+    const small = await plans.savePlan(body(id, { plan: planWith(['a', 'b', 'c']) }));
+    await plans.savePlan(body(id, { plan: planWith(['a', 'x']) }));
+
+    expect((await plans.findPlanByFieldSet(['a', 'b']))?.id).toBe(small.id);
+  });
+
+  it('breaks a tie in size towards the newest plan', async () => {
+    const id = await profileId();
+    const { plans } = await loadRoutes();
+    const older = await plans.savePlan(body(id, { plan: planWith(['a', 'b']) }));
+    const newer = await plans.savePlan(body(id, { plan: planWith(['b', 'a']) }));
+    const { createClient } = await import('@libsql/client');
+    const client = createClient({ url: db.url });
+    await client.execute({ sql: "UPDATE research_plans SET created_at = '2000-01-01 00:00:00' WHERE id = ?", args: [older.id] });
+    client.close();
+
+    expect((await plans.findPlanByFieldSet(['a', 'b']))?.id).toBe(newer.id);
+  });
+
+  it('returns null when no saved plan covers the names', async () => {
+    const id = await profileId();
+    const { plans } = await loadRoutes();
+    await plans.savePlan(body(id, { plan: planWith(['a', 'b']) }));
+
+    expect(await plans.findPlanByFieldSet(['a', 'nothing_planned'])).toBeNull();
+  });
+
+  it('returns null for an empty set', async () => {
+    const { plans } = await loadRoutes();
+
+    expect(await plans.findPlanByFieldSet([])).toBeNull();
   });
 });

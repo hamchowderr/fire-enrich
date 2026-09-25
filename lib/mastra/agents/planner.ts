@@ -2,7 +2,6 @@ import { Agent } from '@mastra/core/agent';
 import type { RequestContext } from '@mastra/core/request-context';
 import { z } from 'zod';
 
-import { isDoltConfigured } from '@/lib/dolt';
 import { getProfile, listProfiles, resolveProfileModels, type Profile } from '@/lib/profiles';
 import { generateVariableName } from '@/lib/utils/field-utils';
 
@@ -45,8 +44,8 @@ export type PlannerProfile = {
 };
 
 /**
- * Minimal stand-in used when there is no profile to read: Dolt is not
- * configured, or it holds no profiles yet. Deliberately vague so it never
+ * Minimal stand-in used when there is no profile to read: none has been
+ * created yet, or the database could not be read. Deliberately vague so it never
  * steers a plan towards one kind of business.
  */
 const GENERIC_PROFILE: PlannerProfile['profile'] = {
@@ -72,16 +71,14 @@ const PROFILE_KEY = 'planner.profile';
  * - A requested id is read, and a missing row falls back to the generic
  *   profile (the route checks existence first and answers 404 instead).
  * - With no id: `DEFAULT_PROFILE_ID` when set, else the newest profile.
- * - With Dolt unconfigured or empty: the generic profile.
+ * - With no profiles stored: the generic profile.
  *
- * A failure to reach Dolt on the no-id path also falls back to generic: planning
+ * A failure to read the database on the no-id path also falls back to generic: planning
  * worked before profiles existed, and a database outage should degrade the plan
  * rather than take field generation down with it. A requested id does not get
  * that grace, because the caller asked for something specific.
  */
 export async function resolvePlannerProfile(profileId?: string): Promise<PlannerProfile> {
-  if (!isDoltConfigured()) return { profile: GENERIC_PROFILE, source: 'generic' };
-
   if (profileId) {
     const requested = await getProfile(profileId);
     return requested

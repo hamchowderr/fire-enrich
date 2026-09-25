@@ -25,7 +25,8 @@ import plannerFixtures from '../../fixtures/planner-plan.json';
  * rendered the profile and that structured output reached the wire.
  *
  * Saved plans are mocked at `lib/plans.ts` the same way: `planId` and
- * `save: true` are tested for what the route reads and writes, not for Dolt.
+ * `save: true` are tested for what the route reads and writes. No Dolt is
+ * configured in any case: profiles and saved plans live in libSQL.
  *
  * Requires AIMock on `AIMOCK_URL` (`npm run test:ai` starts it).
  */
@@ -121,7 +122,8 @@ async function journal(): Promise<Array<{ body?: Record<string, unknown> }>> {
   return Array.isArray(entries) ? entries : [];
 }
 
-const DOLT_ENV = { DOLT_HOST: '127.0.0.1', DOLT_DATABASE: 'fire_enrich_test' } as const;
+const DOLT_ENV = ['DOLT_HOST', 'DOLT_PORT', 'DOLT_USER', 'DOLT_PASSWORD', 'DOLT_DATABASE'] as const;
+const savedDolt: Record<string, string | undefined> = {};
 
 let server: Server;
 
@@ -140,9 +142,11 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  // Dolt "configured" so the planner asks lib/profiles, which is mocked above;
-  // no connection is ever opened.
-  Object.assign(process.env, DOLT_ENV);
+  // No Dolt: the planner asks lib/profiles (mocked above) all the same.
+  for (const key of DOLT_ENV) {
+    savedDolt[key] = process.env[key];
+    delete process.env[key];
+  }
   delete process.env.DEFAULT_PROFILE_ID;
   getProfile.mockImplementation(async (id) => (id === EXAMPLE_PROFILE.id ? EXAMPLE_PROFILE : null));
   listProfiles.mockResolvedValue([EXAMPLE_PROFILE]);
@@ -158,7 +162,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const key of Object.keys(DOLT_ENV)) delete process.env[key];
+  for (const key of DOLT_ENV) {
+    if (savedDolt[key] === undefined) delete process.env[key];
+    else process.env[key] = savedDolt[key];
+  }
   vi.clearAllMocks();
 });
 
@@ -313,19 +320,12 @@ describe(`POST ${ROUTE}`, () => {
     expect(response.body.error).toBe('No plan with id missing');
   });
 
-  it('answers 503 for a planId when Dolt is not configured', async () => {
-    for (const key of Object.keys(DOLT_ENV)) delete process.env[key];
-
-    await request(server).post(ROUTE).send({ planId: SAVED_PLAN.id }).expect(503);
-    expect(getPlan).not.toHaveBeenCalled();
-  });
-
   it(
-    'answers the UI `{ prompt }` body with a generic plan when Dolt is not configured',
+    'answers the UI `{ prompt }` body with a generic plan when no profile exists',
     { timeout: 30_000 },
     async () => {
-      // What the frozen UI hits on a fresh clone: no DOLT_* set, no profile id.
-      for (const key of Object.keys(DOLT_ENV)) delete process.env[key];
+      // What the frozen UI hits on a fresh clone: no profiles, no profile id.
+      listProfiles.mockResolvedValue([]);
 
       const response = await request(server)
         .post(ROUTE)
@@ -343,9 +343,9 @@ describe(`POST ${ROUTE}`, () => {
       expect(legacy.interpretation).toBe(GENERIC_PLAN.interpretation);
       expect(ResearchPlan.parse(plan)).toEqual(GENERIC_PLAN);
 
-      // The profile layer was never asked, and the model was told it had none.
+      // The profile layer had none, and the model was told so.
       expect(getProfile).not.toHaveBeenCalled();
-      expect(listProfiles).not.toHaveBeenCalled();
+      expect(listProfiles).toHaveBeenCalled();
       const [last] = (await journal()).filter((entry) => JSON.stringify(entry.body).includes(GENERIC_GOAL)).slice(-1);
       const system = JSON.stringify(
         (last?.body as { messages?: Array<{ role: string }> }).messages?.filter(
@@ -364,13 +364,6 @@ describe(`POST ${ROUTE}`, () => {
       .expect(404);
 
     expect(response.body.error).toMatch(/missing/);
-  });
-
-  it('answers 503 for a profile id when Dolt is not configured', async () => {
-    for (const key of Object.keys(DOLT_ENV)) delete process.env[key];
-
-    await request(server).post(ROUTE).send({ profileId: EXAMPLE_PROFILE.id, goal: GOAL }).expect(503);
-    expect(getProfile).not.toHaveBeenCalled();
   });
 
   it('rejects a body with neither prompt nor goal', async () => {

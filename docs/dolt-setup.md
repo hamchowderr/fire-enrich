@@ -5,9 +5,10 @@ enrichment run is recorded with its enrichments and evidence, ends in one Dolt
 commit, and `GET /api/runs/:id/diff` compares it with the previous run of the
 same list.
 
-Run history requires Dolt. Profiles and saved plans currently also require
-it, until they move to Turso. Without Dolt, enrichment runs still stream but
-are not recorded, and the profile and plan routes answer 503.
+Run history requires Dolt. Profiles and saved plans do not: they are stored
+in the libSQL database every deployment has (Turso, or the local
+`.mastra/fire-enrich.db` file). Without Dolt, enrichment runs still stream but
+are not recorded, and profiles and saved plans work as usual.
 
 The app connects with the `DOLT_*` variables that `lib/dolt.ts` reads. Setting
 `DOLT_HOST` and `DOLT_DATABASE` turns the feature on.
@@ -72,10 +73,12 @@ the process environment, so `npm run db:migrate` alone does not see
 `.env.local`. Instead, you can export the five `DOLT_*` variables in your
 shell and run `npm run db:migrate`.
 
-The first run prints `5 tables changed` and a commit hash. A second run prints
-`nothing changed — no commit`. For now, the five tables include `profiles` and
-`research_plans`, as well as the run tables (`enrichment_runs`, `enrichments`,
-`evidence`).
+The first run prints `3 tables changed` and a commit hash. A second run prints
+`nothing changed — no commit`. The three tables are the run tables
+(`enrichment_runs`, `enrichments`, `evidence`). A database created before
+profiles and plans moved to libSQL also has `profiles` and `research_plans`
+tables. The migration leaves them in place, unused, and removes the foreign
+key from `enrichment_runs` to `research_plans`.
 
 ### 4. Run the app
 

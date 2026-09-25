@@ -42,9 +42,9 @@
  * - A run's merge commit can carry someone else's uncommitted change.
  *   `DOLT_MERGE('--no-commit')` stages the merge on top of `main`'s working
  *   set, and `DOLT_COMMIT('-Am')` commits that whole working set. A write on
- *   `main` that is committed as SQL but not yet as a Dolt commit (a profile
- *   write between its INSERT and its `DOLT_COMMIT`, from this process or
- *   another) is swept into the run's merge commit. Nothing is lost, but that
+ *   `main` that is committed as SQL but not yet as a Dolt commit (another
+ *   run's merge between its SQL and its `DOLT_COMMIT`, or a manual edit) is
+ *   swept into the run's merge commit. Nothing is lost, but that
  *   commit's diff is then more than the run.
  * - The merge lock is per process. Merges from several app instances can
  *   overlap. Dolt merges concurrent transactions cell by cell, and runs
@@ -67,8 +67,8 @@
  * - One extra connection per run in flight, outside the pool.
  * - Dolt refuses a merge into `main` while `main`'s working set holds
  *   uncommitted changes to a table the merge touches ("local changes would be
- *   stomped by merge"). Writes to the run tables only ever arrive by merge, and
- *   profile writes commit at once, so this only happens after a manual,
+ *   stomped by merge"). Writes to the run tables only ever arrive by merge,
+ *   so this only happens after a manual,
  *   uncommitted edit of those tables on `main`; the run then stays on its
  *   branch, committed but unmerged.
  *
@@ -209,9 +209,13 @@ function isMissingParent(error: unknown): boolean {
  * Start a run: branch `run/<id>` off `main`, open a connection on it, and
  * insert the run row with status `running`.
  *
- * `planId` is null for a plan that has no saved row (the planner fallback). A
- * plan id whose row is not on `main`'s head (an uncommitted save) would fail
- * the foreign key; the run is then recorded without it rather than not at all.
+ * `planId` is the id of the saved plan in the app's libSQL database
+ * (`lib/plans.ts`), stored as a plain value: no foreign key crosses the two
+ * databases. It is null for a plan that has no saved row (the planner
+ * fallback). A Dolt database not yet migrated past the move of plans to
+ * libSQL still has a foreign key from `plan_id` to its own, now unused,
+ * `research_plans`, which rejects the id; the run is then recorded without it
+ * rather than not at all.
  */
 export async function startRun({
   planId,

@@ -1,9 +1,9 @@
 /**
- * HTTP glue shared by the Dolt-backed route files: profiles, saved plans, and
- * field generation when it reads or saves a plan.
+ * HTTP glue shared by the route files for profiles, saved plans, and field
+ * generation when it reads or saves a plan.
  *
- * Every one of them needs the same three answers — "Dolt is not configured",
- * "that body is not JSON", "that body is the wrong shape" — and a client should
+ * Every one of them needs the same answers — "that body is not JSON", "that
+ * body is the wrong shape", "no such row" — and a client should
  * not be able to tell which handler it hit from the error it gets back. Keeping
  * them here means one wording and one status code per condition instead of
  * copies that drift. The helpers name the resource in their message
@@ -16,27 +16,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import type { ZodError } from 'zod';
 
-import { isDoltConfigured } from '@/lib/dolt';
 import type { ProfileNameTakenError } from '@/lib/profiles';
-
-/**
- * 503 when Dolt is not configured, `null` when it is.
- *
- * 503 and not 500: nothing has failed, the feature is not switched on in this
- * environment. The message names the feature that needs it (a plural noun:
- * "Profiles", "Saved plans") and the variables to set, so the answer is
- * actionable without reading the source.
- */
-export function requireDolt(feature = 'Profiles'): NextResponse | null {
-  if (isDoltConfigured()) return null;
-
-  return NextResponse.json(
-    {
-      error: `${feature} need a Dolt database. Set DOLT_HOST and DOLT_DATABASE (see .env.example) and restart.`,
-    },
-    { status: 503 }
-  );
-}
 
 /**
  * Read a JSON request body.
