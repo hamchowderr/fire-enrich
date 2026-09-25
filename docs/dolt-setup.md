@@ -3,7 +3,11 @@
 Dolt is optional. It enables versioned run history and run-to-run diffs: each
 enrichment run is recorded with its enrichments and evidence, ends in one Dolt
 commit, and `GET /api/runs/:id/diff` compares it with the previous run of the
-same list. Without Dolt, the app runs normally and does not record runs.
+same list.
+
+Run history requires Dolt. Profiles and saved plans currently also require
+it, until they move to Turso. Without Dolt, enrichment runs still stream but
+are not recorded, and the profile and plan routes answer 503.
 
 The app connects with the `DOLT_*` variables that `lib/dolt.ts` reads. Setting
 `DOLT_HOST` and `DOLT_DATABASE` turns the feature on.
@@ -30,7 +34,8 @@ docker run -d --name fire-enrich-dolt -p 127.0.0.1:3306:3306 -v fire-enrich-dolt
 - `DOLT_ROOT_HOST=%` lets `root` log in from your machine. Without it, `root`
   can log in only from inside the container. The password stays empty, so the
   port is bound to `127.0.0.1` only.
-- `DOLT_DATABASE` creates the `fire_enrich` database on first start.
+- `DOLT_DATABASE` makes the image create the `fire_enrich` database if it does
+  not exist yet. The image checks this on every start.
 
 Without Docker: install Dolt 2.3.1 from the
 [release page](https://github.com/dolthub/dolt/releases/tag/v2.3.1), then run
@@ -68,7 +73,9 @@ the process environment, so `npm run db:migrate` alone does not see
 shell and run `npm run db:migrate`.
 
 The first run prints `5 tables changed` and a commit hash. A second run prints
-`nothing changed — no commit`.
+`nothing changed — no commit`. For now, the five tables include `profiles` and
+`research_plans`, as well as the run tables (`enrichment_runs`, `enrichments`,
+`evidence`).
 
 ### 4. Run the app
 
@@ -103,18 +110,29 @@ openssl rand -hex 24   # use one output for DOLT_ROOT_PASSWORD
 openssl rand -hex 24   # and another for DOLT_PASSWORD
 ```
 
-Edit `deploy/dolt/dolt.env` and replace both `change-me` values. The image
-puts the passwords into a quoted SQL string, so use only letters and digits
-(hex output is safe).
+Edit `deploy/dolt/dolt.env` and set both passwords, which are empty in the
+example. The image puts the passwords into a quoted SQL string, so use only
+letters and digits (hex output is safe). If `DOLT_PASSWORD` stays empty, the
+container does not start: it logs `DOLT_USER specified, but missing
+MYSQL_PASSWORD/DOLT_PASSWORD` and restarts in a loop.
 
-On first start, while the volume is empty, the image creates:
+On every start, the image runs `CREATE DATABASE IF NOT EXISTS` and
+`CREATE USER IF NOT EXISTS` for the values in `dolt.env`, then grants the
+privileges again. This gives:
 
 - the database `DOLT_DATABASE` (`fire_enrich`);
 - the user `DOLT_USER` (`fire_enrich`), which can log in from any address, with
   all privileges on that database and no server-wide privileges;
 - `root`, which can log in only from inside the container.
 
-A later change to `dolt.env` does not change an existing user or password.
+Because of `IF NOT EXISTS`, a later change to a password in `dolt.env` does
+not change the password of a user that already exists. If you rename
+`DOLT_USER` later, the next start creates the new user, and the old user can
+still log in until you drop it:
+
+```sh
+docker compose -f docker-compose.dolt.yml exec dolt dolt sql -q "DROP USER 'old_user'@'%';"
+```
 
 ### 2. Make the TLS certificate
 
@@ -151,9 +169,10 @@ docker compose -f docker-compose.dolt.yml up -d
 docker compose -f docker-compose.dolt.yml logs -f dolt
 ```
 
-Wait for `Dolt init process done. Ready for connections.` The first start
+Wait for `Dolt init process done. Ready for connections.` Every start
 also logs `Creating database 'fire_enrich'` and
-`Creating user 'fire_enrich@%'`.
+`Creating user 'fire_enrich@%'`. These are `IF NOT EXISTS` statements, so the
+log lines appear even when the database and user already exist.
 
 To stop it, use `docker compose -f docker-compose.dolt.yml down`. The data stays in
 the `fire-enrich-dolt_dolt-data` volume. Only `down -v` deletes the data.
@@ -187,10 +206,18 @@ base64 -w0 deploy/dolt/certs/server.crt; echo
 On macOS, use `base64 -i deploy/dolt/certs/server.crt`. This is the
 certificate, not the key. Never copy `server.key` off the server.
 
-`mysql2` verifies the certificate chain but not the host name, unless
-`ssl.verifyIdentity` is set, and `lib/dolt.ts` does not set it. The trust
-comes from the pinned certificate. The name in the certificate is for other
-clients that do check it, such as `mysql --ssl-mode=VERIFY_IDENTITY`.
+> **Known gap: the app does not check the host name.** `mysql2` checks the
+> certificate chain, but it checks the host name only when
+> `ssl.verifyIdentity` is set, and `lib/dolt.ts` does not set it. The app
+> therefore accepts any certificate that the configured CA signed, whatever
+> host it names. This is safe only while `DOLT_TLS_CA_B64` is exactly this
+> one self-signed server certificate, which signs nothing else. **Never set
+> `DOLT_TLS_CA_B64` to a shared or organisation CA.** A CA that signs other
+> certificates would let any of those certificates impersonate this server.
+> The fix in code is tracked as `fe-ah9`. Until then, still put the correct
+> name in the certificate (step 2): clients that do check host names need it,
+> such as `mysql --ssl-mode=VERIFY_IDENTITY`, and so will the app after the
+> fix.
 
 ### 6. Set the Vercel environment variables
 

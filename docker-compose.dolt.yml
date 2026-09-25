@@ -14,7 +14,8 @@ services:
     image: dolthub/dolt-sql-server:2.3.1
     restart: unless-stopped
     # DOLT_ROOT_PASSWORD, DOLT_DATABASE, DOLT_USER, DOLT_PASSWORD and
-    # DOLT_USER_HOST. The image creates the database and user on first start.
+    # DOLT_USER_HOST. On every start the image runs CREATE DATABASE / USER
+    # IF NOT EXISTS for them. An empty DOLT_PASSWORD stops the start.
     env_file: deploy/dolt/dolt.env
     ports:
       - '3306:3306'
