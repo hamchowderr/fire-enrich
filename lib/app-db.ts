@@ -20,10 +20,15 @@
  * Every later transaction or write batch on that connection then fails with
  * "cannot commit transaction - SQL statements in progress" and keeps the
  * database's write lock, so writes from every other client, Mastra's store
- * included, fail until the process restarts. A per-call client takes that
- * connection with it when it closes. Closing explicitly also releases the
- * native handle at once, not when the garbage collector reaches it
- * (https://github.com/tursodatabase/libsql-client-ts/issues/350).
+ * included, fail until the process restarts. A per-call client is not used
+ * again after its call, so a connection left in that state is never reused.
+ *
+ * `close()` is called in a `finally`, but for a local file it does not free
+ * the native database handle: the handle stays open until the garbage
+ * collector reclaims the client
+ * (https://github.com/tursodatabase/libsql-client-ts/issues/350). So each
+ * per-call client on a local file holds a handle until GC releases it. A
+ * `libsql:` url uses HTTP and holds no native handle.
  *
  * The cost is small in both modes: a local file opens in well under a
  * millisecond, and a `libsql:` url is served over HTTP, where a client holds

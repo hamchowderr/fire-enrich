@@ -95,7 +95,8 @@ Set a flag only when Preview's variables point at a database no production deplo
 uses. A failed migration fails the deployment. Local `npm run build` is plain
 `next build` and needs no database. Off Vercel (`next dev`, `next start`, tests) the
 app applies the libSQL schema itself on first use, to the local file or to a Turso
-url from `.env.local`; on Vercel only the build does.
+url from `.env.local`; on Vercel only the build does. Because local runs apply the
+schema at first use, `.env.local` must not point at the production Turso database.
 
 Dolt is optional (`doltConfigState()` in `lib/dolt-config.mjs`). With no `DOLT_*`
 connection variable set, the build logs one line, skips the migration and
