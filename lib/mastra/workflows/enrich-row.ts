@@ -170,8 +170,9 @@ const GroupResultSchema = z.object({
  *
  * With `errorStrategy: 'fallback'` Mastra hands back this value instead of
  * throwing, so a group whose output misses the schema degrades to "no
- * findings" and the row still completes. The note doubles as the marker that
- * tells the fallback apart from a genuine empty answer.
+ * findings" and the row still completes. The note is text the user sees; the
+ * research step detects the fallback from `stream.usedFallbackValue`, never
+ * from this note, so a model that writes the same words is not a failure.
  */
 const STRUCTURED_OUTPUT_FAILED = 'The research result did not match the expected format, so no findings were kept.';
 const NO_FINDINGS: PhaseOutputType = { findings: [], notes: STRUCTURED_OUTPUT_FAILED };
@@ -421,7 +422,9 @@ function researchGroupStep<TId extends string>(id: TId) {
 
       const parsed = PhaseOutput.safeParse(await stream.object);
       const output = parsed.success ? parsed.data : NO_FINDINGS;
-      const structuredOutputFailed = !parsed.success || output.notes === STRUCTURED_OUTPUT_FAILED;
+      // Read only after `stream.object` resolves: Mastra sets the flag when it
+      // processes the final object, and it starts out false.
+      const structuredOutputFailed = !parsed.success || stream.usedFallbackValue;
 
       const checked = checkFindings(output.findings, group.fieldNames, readUrls);
 
