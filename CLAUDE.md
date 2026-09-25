@@ -58,6 +58,13 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 <!-- END BEADS INTEGRATION -->
 
 
+## Branches
+
+- `main` is the product. Pull requests target `main`.
+- Production deploys from `main`: every merge to `main` deploys production and runs the database migration (see below).
+- `upstream-main` mirrors `firecrawl/fire-enrich` main. Branch from it for changes meant for upstream.
+- Work happens on `feature/`, `fix/` and `chore/` branches.
+
 ## Build & Test
 
 ```bash
