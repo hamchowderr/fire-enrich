@@ -63,32 +63,8 @@ export function resolveModel(role: ModelRole, override?: string): MastraModelCon
     // Completions is the endpoint its fixture format is documented against.
     const openai = createOpenAI({ baseURL: `${aimockBaseUrl()}/v1`, apiKey: 'mock' });
 
-    return toMastraModel(openai.chat(process.env.AIMOCK_MODEL ?? DEFAULT_AIMOCK_MODEL));
+    return openai.chat(process.env.AIMOCK_MODEL ?? DEFAULT_AIMOCK_MODEL);
   }
 
-  return toMastraModel(gateway(override ?? DEFAULT_MODEL_IDS[role]));
-}
-
-/**
- * Bridge a types-only mismatch between two packages that are correct at runtime.
- *
- * `@mastra/core` 1.67.0 ships a vendored snapshot of `@ai-sdk/provider` 4.0.4
- * and types `LanguageModelV4` against it. `@ai-sdk/gateway` 4.0.88 and
- * `@ai-sdk/openai` 4.0.72 both depend on `@ai-sdk/provider` 4.0.17, which
- * redefined `JSONValue` to use `Readonly<JSONObject>` and `readonly JSONValue[]`.
- * A readonly array is not assignable to a mutable one, so the two
- * `LanguageModelV4` types no longer structurally match even though the object
- * satisfies both specs: the difference is variance on provider metadata, not
- * shape or behaviour.
- *
- * Pinning `@ai-sdk/provider` back for the whole dependency tree would trade a
- * compile-time mismatch for a real runtime risk, so the unsound step is kept
- * to this one boundary. Remove this function once Mastra vendors a provider
- * snapshot at 4.0.17 or later and the assignment compiles on its own.
- *
- * The parameter is typed through the gateway's return type rather than by
- * importing `@ai-sdk/provider`, which is not a direct dependency.
- */
-function toMastraModel(model: ReturnType<typeof gateway>): MastraModelConfig {
-  return model as unknown as MastraModelConfig;
+  return gateway(override ?? DEFAULT_MODEL_IDS[role]);
 }

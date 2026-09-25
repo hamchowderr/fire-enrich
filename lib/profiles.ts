@@ -15,7 +15,7 @@
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 
-import { commit, query, select, toJsonColumn } from '@/lib/dolt';
+import { commit, connect, parseJsonColumns, query, select, toJsonColumn } from '@/lib/dolt';
 import { DEFAULT_MODEL_IDS, type ModelRole } from '@/lib/mastra/models';
 
 /** Columns holding JSON, parsed on read and stringified on write. */
@@ -127,6 +127,69 @@ function buildUpdate(
   return { sql: `UPDATE profiles SET ${assignments.join(', ')} WHERE id = ?`, params };
 }
 
+/** How {@link updateProfile} applies a patch. */
+export interface UpdateProfileOptions {
+  /**
+   * Merge the object columns into the stored values instead of replacing them.
+   *
+   * `models` merges per role key and `crm_defaults` merges recursively through
+   * plain objects. Every other field, the arrays included, is replaced as
+   * without the option: there is no way to address one element of a list of
+   * strings, so a merge of `audiences` could only append, and an editor that
+   * removes an audience would have no way to say so.
+   */
+  merge?: boolean;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merge `patch` into `base` through nested plain objects; any other value in
+ * `patch` (an array, a scalar, `null`) replaces what `base` held at that key.
+ *
+ * Returns a new object and leaves both inputs alone. Keys are defined rather
+ * than assigned so a `__proto__` key from parsed JSON stays an ordinary own
+ * property instead of reaching the prototype setter.
+ */
+function deepMerge(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base };
+
+  for (const [key, value] of Object.entries(patch)) {
+    const current = Object.hasOwn(merged, key) ? merged[key] : undefined;
+    Object.defineProperty(merged, key, {
+      value: isPlainObject(current) && isPlainObject(value) ? deepMerge(current, value) : value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+
+  return merged;
+}
+
+/**
+ * The patch with its object columns merged into the stored profile.
+ *
+ * `models` is flat (role to model id), so a key-level spread is the whole
+ * merge. The result still has to pass {@link updateProfileSchema}: the stored
+ * half never went through this request's validation.
+ */
+function mergeIntoStored(existing: Profile, patch: UpdateProfileInput): UpdateProfileInput {
+  const merged = { ...patch };
+
+  if (patch.models) merged.models = { ...(existing.models ?? {}), ...patch.models };
+  if (patch.crm_defaults) {
+    merged.crm_defaults = deepMerge(existing.crm_defaults ?? {}, patch.crm_defaults);
+  }
+
+  return merged;
+}
+
 /**
  * A write collided with the `UNIQUE` index on `profiles.name`.
  *
@@ -221,12 +284,24 @@ export async function createProfile(input: CreateProfileInput): Promise<Profile>
  * rather than an `UPDATE` that reports zero affected rows — which is also what a
  * patch that changes nothing reports, and the two mean different things.
  *
+ * With `options.merge`, the object columns are merged into the stored values
+ * (see {@link UpdateProfileOptions}) inside one transaction, and the merged
+ * result is validated again before anything is written. See
+ * {@link mergeProfile}.
+ *
+ * @throws {ZodError} when the patch, or with `merge` the merged result, is
+ *   invalid. Nothing is written or committed.
  * @throws {ProfileNameTakenError} when the patch renames onto a name in use.
+ * @throws {ProfileMergeConflictError} when a merge lost every retry to
+ *   concurrent writers of the same profile.
  */
 export async function updateProfile(
   id: string,
-  patch: UpdateProfileInput
+  patch: UpdateProfileInput,
+  options: UpdateProfileOptions = {}
 ): Promise<Profile | null> {
+  if (options.merge) return mergeProfile(id, updateProfileSchema.parse(patch));
+
   const existing = await getProfile(id);
   if (!existing) return null;
 
@@ -247,6 +322,129 @@ export async function updateProfile(
   await commit(`Update profile ${id} (${existing.name})`, COMMIT_AUTHOR);
 
   return getProfile(id);
+}
+
+/**
+ * How many times a merge restarts after losing a race to another writer. Each
+ * attempt re-reads the row, so a retry merges on top of the winner's write.
+ */
+const MERGE_ATTEMPTS = 3;
+
+/**
+ * Dolt's answer when a transaction's commit collides with a transaction
+ * another client committed first: "serialization failure: this transaction
+ * conflicts with a committed transaction from another client, try restarting
+ * transaction."
+ */
+function isSerializationFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /serialization failure|try restarting transaction/i.test(message);
+}
+
+/**
+ * Every attempt of a merge lost the race to another writer of the same
+ * profile. Nothing was written. The request is safe to repeat: a repeat reads
+ * the row again and merges on top of whatever the other writers left.
+ */
+export class ProfileMergeConflictError extends Error {
+  readonly profileId: string;
+
+  constructor(profileId: string, cause: unknown) {
+    super(
+      `Profile ${profileId} was changed by another request during each of ${MERGE_ATTEMPTS} merge attempts. Nothing was written; retry the request.`,
+      { cause }
+    );
+    this.name = 'ProfileMergeConflictError';
+    this.profileId = profileId;
+  }
+}
+
+/**
+ * The merge path of {@link updateProfile}: read, merge and write in one SQL
+ * transaction, retried when Dolt reports that another writer got there first.
+ *
+ * A read on the pool followed by a separate `UPDATE` would lose updates: two
+ * merges read the same row, and the second write silently drops the key the
+ * first one added. The transaction closes that gap. Dolt has no row locks
+ * (`SELECT … FOR UPDATE` parses but locks nothing), so the protection comes
+ * from how Dolt commits a transaction instead: it merges the transaction's
+ * changes into what other clients committed since it began, cell by cell and
+ * JSON key by JSON key. Two merges that add different keys both land. Two that
+ * set the same key to different values collide, the later `COMMIT` fails with
+ * a serialization failure, and the retry reads the winner's row and merges on
+ * top of it.
+ *
+ * Only the transaction is retried. The Dolt commit and the read-back run once,
+ * after a transaction has committed: by then the merge is applied, and
+ * replaying it would apply it again on top of itself.
+ *
+ * @throws {ProfileMergeConflictError} when every attempt lost the race.
+ */
+async function mergeProfile(id: string, patch: UpdateProfileInput): Promise<Profile | null> {
+  let profileName: string | null;
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      profileName = await mergeTransaction(id, patch);
+      break;
+    } catch (error) {
+      if (!isSerializationFailure(error)) throw error;
+      if (attempt >= MERGE_ATTEMPTS) throw new ProfileMergeConflictError(id, error);
+    }
+  }
+
+  if (profileName === null) return null;
+
+  await commit(`Update profile ${id} (${profileName})`, COMMIT_AUTHOR);
+
+  return getProfile(id);
+}
+
+/**
+ * One attempt of {@link mergeProfile}: `START TRANSACTION`, `SELECT`, `UPDATE`,
+ * `COMMIT`, on a dedicated connection so every statement runs in the same
+ * session. The pool would hand each statement to whichever connection is
+ * free.
+ *
+ * Returns the profile's name as read, for the commit message, or `null` when
+ * no row has that id. A missing row, an invalid merged result or a rejected
+ * write rolls back, so nothing is written.
+ */
+async function mergeTransaction(id: string, patch: UpdateProfileInput): Promise<string | null> {
+  const connection = await connect();
+
+  try {
+    await connection.query('START TRANSACTION');
+    let existingName: string | undefined;
+    let merged: UpdateProfileInput | undefined;
+
+    try {
+      const [rows] = await connection.query(SELECT_PROFILE_BY_ID, [id]);
+      const [row] = rows as Record<string, unknown>[];
+      if (!row) {
+        await connection.query('ROLLBACK');
+        return null;
+      }
+      const existing = parseJsonColumns(row, JSON_COLUMNS) as Profile;
+      existingName = existing.name;
+
+      merged = updateProfileSchema.parse(mergeIntoStored(existing, patch));
+      const { sql, params } = buildUpdate(id, merged);
+      await connection.query(sql, params);
+      await connection.query('COMMIT');
+
+      return existingName;
+    } catch (error) {
+      await connection.query('ROLLBACK').catch(() => undefined);
+      // As in the replace path: report the name the row would have ended up with.
+      if (isDuplicateName(error)) {
+        throw new ProfileNameTakenError(merged?.name ?? existingName ?? id);
+      }
+      throw error;
+    }
+  } finally {
+    await connection.end().catch(() => undefined);
+  }
 }
 
 /** Delete a profile and commit it. `false` when no row had that id. */

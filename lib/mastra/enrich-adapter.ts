@@ -46,7 +46,7 @@ import {
 } from './schemas';
 import type { EnrichRowStreamEvent } from './workflows/enrich-row';
 
-/** What the route needs from a run to stop it: `Run.cancel()` in @mastra/core 1.67. */
+/** What the route needs from a run to stop it: `Run.cancel()` in @mastra/core 1.70. */
 export interface CancellableRun {
   cancel(): Promise<unknown>;
 }
@@ -424,7 +424,7 @@ export async function enrichRowWithMastra({
     }
 
     // A cancelled run resolves with status `canceled`. `WorkflowStreamResult`
-    // includes it, but on 1.67 `run.stream().result` is typed as the narrower
+    // includes it, but on 1.70 `run.stream().result` is typed as the narrower
     // `WorkflowResult` (`stream/RunOutput.d.ts`), which does not, so the
     // comparison needs the widening cast to compile.
     if ((result.status as string) === 'canceled' || signal?.aborted) return null;

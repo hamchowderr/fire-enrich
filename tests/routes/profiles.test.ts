@@ -12,8 +12,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * in a Dolt commit.
  */
 const createPool = vi.fn();
+const createConnection = vi.fn();
 
-vi.mock('mysql2/promise', () => ({ default: { createPool } }));
+vi.mock('mysql2/promise', () => ({ default: { createPool, createConnection } }));
 
 const DOLT_ENV = ['DOLT_HOST', 'DOLT_PORT', 'DOLT_USER', 'DOLT_PASSWORD', 'DOLT_DATABASE'] as const;
 const saved: Partial<Record<(typeof DOLT_ENV)[number], string | undefined>> = {};
@@ -38,6 +39,30 @@ function fakePool() {
 
   createPool.mockReturnValue(pool);
   return pool;
+}
+
+/**
+ * A dedicated connection, as `connect()` opens for a merge. Queued like
+ * {@link fakePool}, with its own call log so a test can tell the two apart.
+ */
+function fakeConnection() {
+  const calls: Array<{ sql: string; params: unknown[] }> = [];
+  const results: unknown[] = [];
+
+  const connection = {
+    calls,
+    queue: (...items: unknown[]) => results.push(...items),
+    end: vi.fn(async () => {}),
+    query: vi.fn(async (sql: string, params: unknown[] = []) => {
+      calls.push({ sql, params });
+      const next = results.shift();
+      if (next instanceof Error) throw next;
+      return [next ?? [], []];
+    }),
+  };
+
+  createConnection.mockResolvedValueOnce(connection);
+  return connection;
 }
 
 /** What `mysql2` throws when a write collides with `uq_profiles_name`. */
@@ -116,6 +141,7 @@ function commits(fake: ReturnType<typeof fakePool>) {
 beforeEach(() => {
   for (const key of DOLT_ENV) saved[key] = process.env[key];
   createPool.mockReset();
+  createConnection.mockReset();
 });
 
 afterEach(() => {
@@ -380,6 +406,221 @@ describe('with Dolt configured', () => {
       expect(body.field).toBe('name');
       expect(body.value).toBe('Second Co');
       expect(commits(fake)).toHaveLength(0);
+    });
+  });
+
+  describe('PUT /api/profiles/:id?merge=true', () => {
+    /** A stored row with two model overrides and a nested CRM default. */
+    const MERGE_ROW = {
+      models: '{"planner":"anthropic/claude-opus-4.5","chat":"openai/gpt-4.1-mini"}',
+      crm_defaults: '{"owner":"sales","pipeline":{"stage":"lead","source":"web"}}',
+    };
+
+    function putWithQuery(id: string, body: unknown, search: string) {
+      return new NextRequest(`http://127.0.0.1/api/profiles/${id}?${search}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    /**
+     * A merge that succeeds: the connection answers START TRANSACTION, the
+     * SELECT, the UPDATE and COMMIT; the pool answers the Dolt commit and the
+     * read-back.
+     */
+    function fakeMerge(row = storedRow(MERGE_ROW), readBack = row) {
+      const pool = fakePool();
+      pool.queue([[{ hash: 'abc' }]], [readBack]);
+      const connection = fakeConnection();
+      connection.queue([], [row], { affectedRows: 1 }, []);
+      return { pool, connection };
+    }
+
+    /** The UPDATE the handler sent, found by its SQL rather than its position. */
+    function updateCall(calls: Array<{ sql: string; params: unknown[] }>) {
+      return calls.find((call) => call.sql.startsWith('UPDATE profiles'));
+    }
+
+    it('merges one model role into the stored overrides and returns all three', async () => {
+      const all = {
+        planner: 'anthropic/claude-opus-4.5',
+        chat: 'openai/gpt-4.1-mini',
+        research: 'openai/gpt-4.1',
+      };
+      const { pool, connection } = fakeMerge(
+        storedRow(MERGE_ROW),
+        storedRow({ ...MERGE_ROW, models: JSON.stringify(all) })
+      );
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merge=true'),
+        context('p1')
+      );
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).profile.models).toEqual(all);
+      expect(JSON.parse(updateCall(connection.calls)?.params[0] as string)).toEqual(all);
+      expect(connection.calls.map((call) => call.sql)).toEqual([
+        'START TRANSACTION',
+        expect.stringContaining('SELECT'),
+        'UPDATE profiles SET models = ? WHERE id = ?',
+        'COMMIT',
+      ]);
+      expect(connection.end).toHaveBeenCalledTimes(1);
+      expect(commits(pool)).toHaveLength(1);
+    });
+
+    it('merges a nested crm_defaults key and keeps its siblings', async () => {
+      const { connection } = fakeMerge();
+      const { item } = await loadRoutes();
+
+      await item.PUT(
+        putWithQuery('p1', { crm_defaults: { pipeline: { stage: 'qualified' } } }, 'merge=true'),
+        context('p1')
+      );
+
+      expect(JSON.parse(updateCall(connection.calls)?.params[0] as string)).toEqual({
+        owner: 'sales',
+        pipeline: { stage: 'qualified', source: 'web' },
+      });
+    });
+
+    it('still replaces the array columns whole', async () => {
+      const { connection } = fakeMerge(storedRow());
+      const { item } = await loadRoutes();
+
+      await item.PUT(putWithQuery('p1', { audiences: ['investors'] }, 'merge=true'), context('p1'));
+
+      expect(updateCall(connection.calls)?.params).toEqual(['["investors"]', 'p1']);
+    });
+
+    it('replaces the column whole without the option, and with merge=false', async () => {
+      for (const search of ['', 'merge=false']) {
+        const fake = fakePool();
+        fake.queue([storedRow(MERGE_ROW)], { affectedRows: 1 }, [[{ hash: 'abc' }]], [
+          storedRow(MERGE_ROW),
+        ]);
+        const { item } = await loadRoutes();
+
+        await item.PUT(
+          putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, search),
+          context('p1')
+        );
+
+        expect(updateCall(fake.calls)?.params).toEqual(['{"research":"openai/gpt-4.1"}', 'p1']);
+      }
+      // The replace path never opens a dedicated connection.
+      expect(createConnection).not.toHaveBeenCalled();
+    });
+
+    it('answers 400, rolls back and writes nothing when the merged result is invalid', async () => {
+      const pool = fakePool();
+      const connection = fakeConnection();
+      // A stored override for a role the schema does not know, as a row written
+      // before `models` was closed to unknown keys would hold.
+      connection.queue([], [storedRow({ models: '{"plannr":"anthropic/claude-opus-4.5"}' })], []);
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merge=true'),
+        context('p1')
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toBe('Invalid profile');
+      expect(body.issues[0].path).toEqual(['models']);
+      expect(connection.calls.map((call) => call.sql)).toEqual([
+        'START TRANSACTION',
+        expect.stringContaining('SELECT'),
+        'ROLLBACK',
+      ]);
+      expect(connection.end).toHaveBeenCalledTimes(1);
+      expect(pool.calls).toHaveLength(0);
+    });
+
+    it('answers 404 without committing when the profile is missing', async () => {
+      const pool = fakePool();
+      const connection = fakeConnection();
+      connection.queue([], []);
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('missing', { offer: 'x' }, 'merge=true'),
+        context('missing')
+      );
+
+      expect(response.status).toBe(404);
+      expect(connection.calls.map((call) => call.sql).at(-1)).toBe('ROLLBACK');
+      expect(pool.calls).toHaveLength(0);
+    });
+
+    it('answers 409 with a retry hint when every merge attempt loses the race', async () => {
+      const pool = fakePool();
+      const connections = [1, 2, 3].map(() => {
+        const connection = fakeConnection();
+        connection.queue(
+          [],
+          [storedRow(MERGE_ROW)],
+          { affectedRows: 1 },
+          new Error(
+            'serialization failure: this transaction conflicts with a committed transaction from another client, try restarting transaction.'
+          )
+        );
+        return connection;
+      });
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merge=true'),
+        context('p1')
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(409);
+      expect(body.error).toContain('p1');
+      expect(body.error).toMatch(/retry the request/);
+      for (const connection of connections) {
+        expect(connection.calls.map((call) => call.sql).at(-1)).toBe('ROLLBACK');
+      }
+      expect(pool.calls).toHaveLength(0);
+    });
+
+    it('answers 400 for a merge value other than true or false, before touching Dolt', async () => {
+      const fake = fakePool();
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merge=yes'),
+        context('p1')
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toBe('Invalid query');
+      expect(body.issues[0].path).toEqual(['merge']);
+      expect(fake.calls).toHaveLength(0);
+      expect(createConnection).not.toHaveBeenCalled();
+    });
+
+    it('answers 400 for a misspelled parameter rather than silently replacing', async () => {
+      const fake = fakePool();
+      const { item } = await loadRoutes();
+
+      const response = await item.PUT(
+        putWithQuery('p1', { models: { research: 'openai/gpt-4.1' } }, 'merg=true'),
+        context('p1')
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toBe('Invalid query');
+      expect(body.issues[0].code).toBe('unrecognized_keys');
+      expect(body.issues[0].keys).toEqual(['merg']);
+      expect(fake.calls).toHaveLength(0);
+      expect(createConnection).not.toHaveBeenCalled();
     });
   });
 
