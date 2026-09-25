@@ -98,6 +98,15 @@ app applies the libSQL schema itself on first use, to the local file or to a Tur
 url from `.env.local`; on Vercel only the build does. Because local runs apply the
 schema at first use, `.env.local` must not point at the production Turso database.
 
+`npm run db:migrate`, `npm run db:migrate:libsql` and `npm run db:sweep-runs` read
+`.env` and `.env.local` with Node's `--env-file-if-exists` flag, in `package.json`.
+A value in `.env.local` wins over `.env`, and a variable already set in the
+environment wins over both. So a local `npm run db:migrate:libsql` targets the
+Turso url in `.env.local`, and a local `npm run db:migrate` or `npm run db:sweep-runs`
+targets the Dolt database in `.env.local`. `scripts/vercel-build.mjs` starts the migration
+scripts with plain `node`, not through these npm scripts, so a Vercel build reads
+only the platform's variables and never a `.env` file.
+
 Dolt is optional (`doltConfigState()` in `lib/dolt-config.mjs`). With no `DOLT_*`
 connection variable set, the build logs one line, skips the migration and
 succeeds. With some set but `DOLT_HOST` or `DOLT_DATABASE` missing (or

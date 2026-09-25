@@ -5,6 +5,9 @@
  *   DOLT_HOST=127.0.0.1 DOLT_PORT=3306 DOLT_USER=root DOLT_PASSWORD= \
  *   DOLT_DATABASE=fire_enrich npm run db:sweep-runs -- [--older-than-hours 6] [--dry-run]
  *
+ * The npm script reads `.env` and `.env.local` (`--env-file-if-exists` in
+ * package.json); a variable already set in the environment wins over both.
+ *
  * A branch idle for more than `--older-than-hours` (default 6) is abandoned:
  * its run's heartbeat (`last_activity_at`), finish and branch commit are all
  * older than that. Its finished rows are committed and merged into `main`: as

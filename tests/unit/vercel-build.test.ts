@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -121,6 +121,7 @@ describe('libsqlPlan', () => {
  */
 describe('vercel-build main()', { timeout: 30_000 }, () => {
   const SCRIPT = fileURLToPath(new URL('../../scripts/vercel-build.mjs', import.meta.url));
+  const REPO = fileURLToPath(new URL('../../', import.meta.url));
   const BUILT = 'stub next build ran';
   const DOLT_ENV = ['DOLT_HOST', 'DOLT_PORT', 'DOLT_USER', 'DOLT_PASSWORD', 'DOLT_DATABASE', 'DOLT_TLS_CA_B64', 'DOLT_PREVIEW_MIGRATE'];
   // Unset per build unless a test passes them: tests/setup.ts points
@@ -137,13 +138,14 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
 
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  function build(extra: Record<string, string>) {
+  function build(extra: Record<string, string>, cwd?: string, unset: string[] = []) {
     const env: NodeJS.ProcessEnv = { ...process.env };
-    for (const key of [...DOLT_ENV, ...TURSO_ENV]) delete env[key];
+    for (const key of [...DOLT_ENV, ...TURSO_ENV, ...unset]) delete env[key];
     // Windows env names are case-insensitive, and the parent's copy may be
     // spelled differently; drop every spelling so the stub is the only one.
     for (const key of Object.keys(env)) if (key.toLowerCase() === 'npm_execpath') delete env[key];
     return spawnSync(process.execPath, [SCRIPT], {
+      cwd,
       encoding: 'utf8',
       env: { ...env, npm_execpath: stub, ...extra },
       timeout: 20_000,
@@ -206,6 +208,39 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
     expect(result.stdout).toContain('db:migrate: production build.');
     expect(result.stderr).toContain('Migration failed against 127.0.0.1:1/fire_enrich');
     expect(result.status).toBe(1);
+  });
+
+  it('runs the migrations without the env files in its project root, so only the platform variables reach them', () => {
+    // A local `vercel build` runs in a checkout that has a developer's env
+    // files. The directory stands in for that project root: the real npm
+    // scripts in a package.json and a junction to the real scripts/, so a
+    // migration started through `npm run db:migrate:libsql` would read the
+    // env files here, as that npm script does.
+    const root = mkdtempSync(join(dir, 'project-'));
+    const { scripts } = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8'));
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'env-isolation', private: true, scripts }));
+    symlinkSync(join(REPO, 'scripts'), join(root, 'scripts'), 'junction');
+
+    // A file-only variable that shows in the output if it reaches a child:
+    // Node applies NODE_OPTIONS from an env file, and this one prints a marker.
+    const marker = join(root, 'leak.cjs');
+    writeFileSync(marker, "console.log('ENV FILE LEAKED');\n");
+    const leak = `NODE_OPTIONS=--require ${marker.replace(/\\/g, '/')}\n`;
+    writeFileSync(join(root, '.env'), leak);
+    writeFileSync(join(root, '.env.local'), leak);
+
+    const platformDb = join(root, 'platform.db');
+    const env: Record<string, string> = { VERCEL_ENV: 'production', TURSO_DATABASE_URL: `file:${platformDb}` };
+    const result = build(env, root, ['NODE_OPTIONS']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(BUILT);
+    // The libSQL migration ran, as a real child, against the platform's url.
+    expect(result.stdout).toContain('db:migrate:libsql: production build.');
+    expect(result.stdout).toContain('platform.db: ');
+    expect(result.stdout).toContain('table:profiles');
+    // And the env files never reached it.
+    expect(`${result.stdout}${result.stderr}`).not.toContain('ENV FILE LEAKED');
   });
 
   it('fails before building on a partial Dolt, naming the missing variable', () => {
