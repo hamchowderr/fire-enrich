@@ -165,6 +165,37 @@ describe('recordRow', () => {
     expect(fake.find(/START TRANSACTION|INSERT INTO enrichments/, branchOf(runId))).toEqual([]);
   });
 
+  it('only warns when an empty row cannot move the heartbeat, and tries again on the next one', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const { recordRow, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    let touches = 0;
+    fake.respond(/SET last_activity_at/, () => {
+      touches += 1;
+      if (touches === 1) throw new Error('Lock wait timeout exceeded');
+      return { affectedRows: 1 };
+    });
+
+    now.mockReturnValue(1_000_000 + 60_000);
+    await expect(recordRow(runId, 'a@b.example', {})).resolves.toBe(0);
+    expect(console.warn).toHaveBeenCalledWith(expect.stringMatching(/Could not move run .* heartbeat: Lock wait timeout exceeded/));
+
+    // Not marked as touched, so the next empty row tries again.
+    await expect(recordRow(runId, 'b@b.example', {})).resolves.toBe(0);
+    expect(touches).toBe(2);
+  });
+
+  it('still fails a real row write when its heartbeat cannot move', async () => {
+    const { recordRow, startRun } = await loadRuns();
+    const runId = await startRun({ listRef: 'x' });
+    fake.respond(/SET last_activity_at/, () => {
+      throw new Error('Lock wait timeout exceeded');
+    });
+
+    await expect(recordRow(runId, 'a@b.example', { headline: enrichment() })).rejects.toThrow('Lock wait timeout exceeded');
+    expect(fake.find(/ROLLBACK/, branchOf(runId))).toHaveLength(1);
+  });
+
   it('moves the heartbeat for an empty row only once the last one is a minute old', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
     const { recordRow, startRun } = await loadRuns();

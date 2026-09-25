@@ -299,9 +299,10 @@ function evidenceOf(enrichment: EnrichmentResult): Array<{ url: string; quote: s
  * Record one finished row: an `enrichments` row per field and an `evidence`
  * row per quote, in one SQL transaction on the run's branch. The same
  * transaction moves the run's heartbeat (`last_activity_at`), so a run that
- * is still recording never looks abandoned to the sweeper. A row with nothing
- * to record moves it on its own when it is older than
- * {@link IDLE_HEARTBEAT_MS}.
+ * is still recording rows never looks abandoned to the sweeper. A row with
+ * nothing to record moves it on its own when it is older than
+ * {@link IDLE_HEARTBEAT_MS}; that write is best effort and a failure of it only
+ * logs a warning.
  *
  * Writes of one run are queued, so rows finishing together are written one
  * after the other and {@link finishRun} waits for every one of them. Resolves
@@ -340,8 +341,18 @@ export function recordRow(
     const { connection } = run;
     if (enrichmentRows.length === 0) {
       if (Date.now() - run.touchedAt >= IDLE_HEARTBEAT_MS) {
-        await connection.query(TOUCH_RUN, [runId]);
-        run.touchedAt = Date.now();
+        // Best effort: this row records nothing, so a failed heartbeat must not
+        // fail the run. The next row tries again.
+        await connection.query(TOUCH_RUN, [runId]).then(
+          () => {
+            run.touchedAt = Date.now();
+          },
+          (error: unknown) => {
+            console.warn(
+              `[RUNS] Could not move run ${runId}'s heartbeat: ${error instanceof Error ? error.message : error}`
+            );
+          }
+        );
       }
       return 0;
     }
@@ -645,10 +656,12 @@ function idleSeconds(row: BranchRunRow): number {
  * A branch's idle time runs from the latest of three writes:
  *
  * - `last_activity_at`, the run's heartbeat: set by {@link startRun}, moved by
- *   every {@link recordRow} (in the row's own transaction; at least once a
- *   minute for rows with nothing to record), by {@link finishRun} and by
- *   {@link abandonRun}. A process that is still running a run keeps this
- *   minutes old at most, so a live run is never swept at a threshold of hours.
+ *   each row {@link recordRow} records (in the row's own transaction; at most
+ *   once a minute for rows with nothing to record), by {@link finishRun} and
+ *   by {@link abandonRun}. It moves only when a row completes, not while one
+ *   is in progress. A live run is therefore safe as long as it completes a
+ *   row more often than the threshold; a process stuck on one row for longer
+ *   than the threshold looks abandoned and is swept.
  * - `finished_at`, set by {@link finishRun} and {@link abandonRun}.
  * - the branch's `latest_commit_date`: the run's commit once {@link finishRun}
  *   made it; before that, the `main` commit the branch was cut from.
