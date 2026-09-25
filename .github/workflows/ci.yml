@@ -121,9 +121,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       dolt:
-        # Pinned to the Dolt the tests were written against. The hosted
-        # server's version is unconfirmed; re-pin to it once known.
-        image: dolthub/dolt-sql-server:2.1.8
+        # Same exact version as the hosted Dolt server. Bump both together
+        # (see "Database migrations" in CLAUDE.md).
+        image: dolthub/dolt-sql-server:2.3.1
         env:
           DOLT_ROOT_PASSWORD: ci
           DOLT_ROOT_HOST: '%'
