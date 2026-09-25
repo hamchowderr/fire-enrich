@@ -102,7 +102,8 @@ schema at first use, `.env.local` must not point at the production Turso databas
 `.env` and `.env.local` with Node's `--env-file-if-exists` flag, in `package.json`.
 A value in `.env.local` wins over `.env`, and a variable already set in the
 environment wins over both. So a local `npm run db:migrate:libsql` targets the
-Turso url in `.env.local`. `scripts/vercel-build.mjs` starts the migration
+Turso url in `.env.local`, and a local `npm run db:migrate` or `npm run db:sweep-runs`
+targets the Dolt database in `.env.local`. `scripts/vercel-build.mjs` starts the migration
 scripts with plain `node`, not through these npm scripts, so a Vercel build reads
 only the platform's variables and never a `.env` file.
 

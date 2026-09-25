@@ -68,8 +68,10 @@ first. Leave `DOLT_TLS_CA_B64` unset, because the local server has no TLS.
 npm run db:migrate
 ```
 
-The npm script reads `.env` and `.env.local`, as the app does. A value in
-`.env.local` wins over `.env`, and a variable already set in your shell wins
+The npm script reads `.env` and `.env.local` only, with Node's
+`--env-file-if-exists` flag. It does not expand `$VAR` references in them, and
+it does not read mode-specific files such as `.env.development.local`. A value
+in `.env.local` wins over `.env`, and a variable already set in your shell wins
 over both. When neither file exists, Node prints one `not found. Continuing
 without it.` line per file and the script uses the shell's variables.
 
