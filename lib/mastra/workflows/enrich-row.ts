@@ -36,6 +36,7 @@ import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { z } from 'zod';
 
 import { RESEARCH_MODEL_KEY, RESEARCH_STRATEGY_KEY } from '../agents/research-context';
+import { checkEvidenceSupport, evidenceCheckConfig } from '../evidence-support';
 import { checkFindings, toEnrichments, type GroupResult } from '../mappers';
 import { restrictPlan } from '../plan-cache';
 import { readUrlsFromToolResult } from '../read-urls';
@@ -375,7 +376,8 @@ function researchItems(
 function researchGroupStep<TId extends string>(id: TId) {
   return createStep({
     id,
-    description: 'Research one group of fields and keep only findings backed by pages the tools read.',
+    description:
+      'Research one group of fields and keep only findings backed by pages the tools read (and, with EVIDENCE_CHECK on, by quotes that support the value).',
     inputSchema: ResearchItem,
     outputSchema: GroupResultSchema,
     stateSchema: WorkflowState,
@@ -426,7 +428,21 @@ function researchGroupStep<TId extends string>(id: TId) {
       // processes the final object, and it starts out false.
       const structuredOutputFailed = !parsed.success || stream.usedFallbackValue;
 
-      const checked = checkFindings(output.findings, group.fieldNames, readUrls);
+      const read = checkFindings(output.findings, group.fieldNames, readUrls);
+
+      // Optional second check: does each kept quote support its value? Off
+      // unless EVIDENCE_CHECK is set; see evidence-support.ts.
+      const evidenceCheck = evidenceCheckConfig();
+      const supported = evidenceCheck.enabled
+        ? await checkEvidenceSupport(read.findings, {
+            classifier: mastra.getClassifier('evidenceSupport'),
+            threshold: evidenceCheck.threshold,
+            fieldDescriptions: new Map(item.fields.map((field) => [field.name, field.description])),
+            groupId: group.id,
+            abortSignal,
+          })
+        : { findings: read.findings, notes: [] };
+      const checked = { findings: supported.findings, notes: [...read.notes, ...supported.notes] };
 
       for (const finding of checked.findings) {
         for (const evidence of finding.evidence) {

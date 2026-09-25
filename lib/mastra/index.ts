@@ -9,6 +9,7 @@ import { chatAgent } from './agents/chat';
 import { identifyAgent } from './agents/identify';
 import { plannerAgent } from './agents/planner';
 import { researchAgent } from './agents/research';
+import { evidenceSupportClassifier } from './evidence-support';
 import { configureAIMock } from './lib/aimock';
 import { enrichRowWorkflow } from './workflows/enrich-row';
 
@@ -124,6 +125,14 @@ function createMastra() {
     },
     workflows: {
       enrichRow: enrichRowWorkflow,
+    },
+    /**
+     * Asked by the research step whether a finding's quote supports its value,
+     * when EVIDENCE_CHECK is on. Registered so its evaluations are traced when
+     * observability is configured (e.g. in Studio); this app configures none.
+     */
+    classifiers: {
+      evidenceSupport: evidenceSupportClassifier,
     },
   });
 }

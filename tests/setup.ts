@@ -29,6 +29,9 @@ process.env.AIMOCK_URL ??= 'http://127.0.0.1:4010';
 process.env.AI_GATEWAY_API_KEY = 'stub';
 process.env.FIRECRAWL_API_KEY = 'stub';
 process.env.MASTRA_TELEMETRY_DISABLED = '1';
+// The evidence-support check calls a real evaluation model; tests that need it
+// on set it themselves (tests/workflows/evidence-check.test.ts).
+process.env.EVIDENCE_CHECK = '0';
 
 const storageDir = path.join(os.tmpdir(), 'fire-enrich-tests');
 mkdirSync(storageDir, { recursive: true });

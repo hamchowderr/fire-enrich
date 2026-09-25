@@ -22,7 +22,9 @@
  *
  * The browser agent refuses to track its page without a memory thread and
  * resource (see `browser.ts`). On 1.71 a sub-agent is given memory only when
- * its parent call carries both a thread and a resource, so browser-strategy
+ * its parent call carries both a thread and a resource and the sub-agent sets
+ * no `memory` in its own default call options (`defaultOptions`; its `Memory`
+ * instance does not count). The browser agent sets none, so browser-strategy
  * calls pass `memory: { thread: runId, resource: sessionId }`. Those ids switch
  * the injection on; they are not the sub-agent's own. The delegated run gets
  * a thread and resource of its own, derived by Mastra (`generateId`, or from
