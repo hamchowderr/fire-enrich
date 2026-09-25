@@ -34,7 +34,7 @@ describe('readUrlsFromToolResult', () => {
     expect(readUrlsFromToolResult({ toolName: 'search', result: { results: [{ url: 'https://www.linkedin.com/company/a' }] } })).toEqual([]);
   });
 
-  it('walks an agent-* sub-agent result in the 1.70 shape', () => {
+  it('walks an agent-* sub-agent result in the 1.71 shape', () => {
     // As `Agent.listAgentTools` returns it: the sub-agent's text plus its own
     // tool results, each `{ toolName, toolCallId, args, result, isError }`.
     const result = {
