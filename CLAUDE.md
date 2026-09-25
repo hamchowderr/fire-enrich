@@ -87,13 +87,15 @@ npm run db:migrate:libsql # create the profile and plan tables in the TURSO_* da
 ### Database migrations
 
 Vercel builds with `npm run build:vercel` (`buildCommand` in `vercel.json`, which runs `scripts/vercel-build.mjs`):
-`npm run build`, then `db:migrate:libsql` whenever `TURSO_DATABASE_URL` is set (every
-environment; it only creates what is missing), then `db:migrate` against that
-deployment's `DOLT_*` database.
-The Dolt migration runs only when `VERCEL_ENV=production`, or on Preview when
-`DOLT_PREVIEW_MIGRATE=1` is set there. Set that flag only when Preview's `DOLT_*`
-point at a database no production deploy uses. A failed migration fails the
-deployment. Local `npm run build` is plain `next build` and needs no database.
+`npm run build`, then `db:migrate:libsql` against that deployment's `TURSO_*` database
+(profiles and saved plans), then `db:migrate` against its `DOLT_*` database (run history).
+Each runs only when `VERCEL_ENV=production`, or on Preview when its opt-in flag is
+set there: `LIBSQL_PREVIEW_MIGRATE=1` for libSQL, `DOLT_PREVIEW_MIGRATE=1` for Dolt.
+Set a flag only when Preview's variables point at a database no production deploy
+uses. A failed migration fails the deployment. Local `npm run build` is plain
+`next build` and needs no database. Off Vercel (`next dev`, `next start`, tests) the
+app applies the libSQL schema itself on first use, to the local file or to a Turso
+url from `.env.local`; on Vercel only the build does.
 
 Dolt is optional (`doltConfigState()` in `lib/dolt-config.mjs`). With no `DOLT_*`
 connection variable set, the build logs one line, skips the migration and
@@ -110,6 +112,12 @@ that old code still makes. Never drop or rename a column or
 table, or tighten a constraint, in the same release as the code that stops
 using it. Do that in a later release, after no live deployment reads it. Every
 statement must stay re-runnable (see the header of `db/schema.sql`).
+
+Runs record `plan_id` values from libSQL, which have no row in Dolt, so a revert of
+the move of profiles and plans to libSQL must not re-add `fk_enrichment_runs_plan`
+to `db/schema.sql`. Dolt 2.3.1 checks existing rows on `ADD CONSTRAINT … FOREIGN KEY`
+(`ER_NO_REFERENCED_ROW_2`), so that migration fails, and fails the deployment, once
+any run holds such a `plan_id`.
 
 CI's `migrate` job applies the base branch's schema to a throwaway
 `dolthub/dolt-sql-server` container, then runs `tests/dolt/migrate.live.test.ts`.

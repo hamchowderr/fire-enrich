@@ -22,7 +22,7 @@
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 
-import { appDb, parseJsonColumns, type Row, selectRows, toJsonColumn } from '@/lib/app-db';
+import { execute, parseJsonColumns, type Row, selectRows, toJsonColumn } from '@/lib/app-db';
 import { ResearchPlan } from '@/lib/mastra/schemas';
 
 /** Columns holding JSON, parsed on read and stringified on write. */
@@ -149,7 +149,7 @@ export async function savePlan(input: SavePlanInput): Promise<SavedPlan> {
   const { profileId, goal, audience, plan } = savePlanSchema.parse(input);
   const id = nanoid();
 
-  const inserted = await (await appDb()).execute({
+  const inserted = await execute({
     sql: INSERT_PLAN,
     args: [id, profileId, goal, audience ?? null, toJsonColumn(plan), profileId],
   });
@@ -171,7 +171,7 @@ export async function savePlan(input: SavePlanInput): Promise<SavedPlan> {
  * the plan.
  */
 export async function deletePlan(id: string): Promise<boolean> {
-  const deleted = await (await appDb()).execute({ sql: DELETE_PLAN, args: [id] });
+  const deleted = await execute({ sql: DELETE_PLAN, args: [id] });
   return deleted.rowsAffected > 0;
 }
 

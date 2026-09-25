@@ -18,7 +18,8 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 
 import {
-  appDb,
+  batchWrite,
+  execute,
   isBusy,
   isUniqueViolation,
   parseJsonColumns,
@@ -252,7 +253,7 @@ export async function createProfile(input: CreateProfileInput): Promise<Profile>
   const id = nanoid();
 
   try {
-    await (await appDb()).execute({
+    await execute({
       sql: INSERT_PROFILE,
       args: [
         id,
@@ -308,7 +309,7 @@ export async function updateProfile(
   const validated = updateProfileSchema.parse(patch);
 
   try {
-    await (await appDb()).execute(buildUpdate(id, validated));
+    await execute(buildUpdate(id, validated));
   } catch (error) {
     // A patch that leaves `name` alone cannot collide, but report whatever name
     // the row would have ended up with rather than guessing.
@@ -359,10 +360,23 @@ export class ProfileMergeConflictError extends Error {
  * is `BEGIN IMMEDIATE`, which takes the database's single write lock before
  * the read; SQLite allows one write transaction at a time, so no other writer
  * can change the row between this read and this write. A second merge that
- * starts meanwhile fails at its own `BEGIN IMMEDIATE` with `SQLITE_BUSY`
- * (libSQL does not wait on a busy lock for a transaction), having written
- * nothing, and its retry reads the first merge's committed row and merges on
- * top of it. On Turso, writes are serialized on the primary the same way.
+ * starts meanwhile fails at its own `BEGIN IMMEDIATE` with `SQLITE_BUSY`,
+ * having written nothing, and its retry reads the first merge's committed row
+ * and merges on top of it. On Turso, writes are serialized on the primary the
+ * same way.
+ *
+ * The retry waits with a timer rather than with the client's `timeout` option
+ * (SQLite's busy timeout for a local file). The local-file driver is
+ * synchronous: a busy wait inside it blocks the Node event loop. When the lock
+ * is held by another request in the same process, that request cannot run to
+ * its `COMMIT` while the loop is blocked, so the wait lasts the full timeout
+ * and fails anyway. A timer yields the loop, so the holder can finish.
+ *
+ * Each attempt runs on a client opened for it and closed after it
+ * (`withWriteTransaction`): a failed `BEGIN IMMEDIATE` leaves its connection
+ * unusable in `@libsql/client` 0.18
+ * (https://github.com/tursodatabase/libsql-client-ts/issues/352), and closing
+ * the client discards that connection.
  *
  * The retry covers `SQLITE_BUSY` only. A missing row, an invalid merged result
  * or a rejected write rolls back and is reported as it is.
@@ -427,13 +441,10 @@ async function mergeTransaction(id: string, patch: UpdateProfileInput): Promise<
  * transaction). `false` when no row had that id.
  */
 export async function deleteProfile(id: string): Promise<boolean> {
-  const [, deleted] = await (await appDb()).batch(
-    [
-      { sql: DELETE_PROFILE_PLANS, args: [id] },
-      { sql: DELETE_PROFILE, args: [id] },
-    ],
-    'write'
-  );
+  const [, deleted] = await batchWrite([
+    { sql: DELETE_PROFILE_PLANS, args: [id] },
+    { sql: DELETE_PROFILE, args: [id] },
+  ]);
 
   return deleted.rowsAffected > 0;
 }

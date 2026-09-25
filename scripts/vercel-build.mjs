@@ -10,13 +10,14 @@
  * plain `next build` and needs no database.
  *
  * libSQL (profiles and saved plans, `scripts/libsql-migrate.mjs`) is decided
- * by {@link libsqlPlan}: it migrates on every environment whenever
- * `TURSO_DATABASE_URL` is set. Its statements only create what is missing, so
- * a Preview build that shares production's Turso database changes nothing
- * there that production's own build would not. Without the variable the
+ * by {@link libsqlPlan}, with the same rule as Dolt: with `TURSO_DATABASE_URL`
+ * set, a `production` build migrates, a `preview` build migrates only with
+ * `LIBSQL_PREVIEW_MIGRATE=1`, and any other build does not. Preview and
+ * Production often share one Turso database, and a branch's schema must not
+ * reach it before the branch is merged. Without `TURSO_DATABASE_URL` the
  * build skips it with one line: the app then uses the local file fallback,
- * which it migrates itself, and which Vercel's read-only disk rejects at
- * runtime with a message naming `TURSO_DATABASE_URL`.
+ * which Vercel's read-only disk rejects at runtime with a message naming
+ * `TURSO_DATABASE_URL`.
  *
  * Dolt is optional (`doltConfigState()` in `lib/dolt-config.mjs`):
  *
@@ -61,17 +62,33 @@ const MIGRATE_SCRIPT = fileURLToPath(new URL('./db-migrate.mjs', import.meta.url
 const LIBSQL_MIGRATE_SCRIPT = fileURLToPath(new URL('./libsql-migrate.mjs', import.meta.url));
 
 /**
- * Decide whether this build applies the libSQL schema: whenever
- * `TURSO_DATABASE_URL` is set to something other than whitespace.
+ * Decide whether this build applies the libSQL schema. Needs
+ * `TURSO_DATABASE_URL` (other than whitespace); then `VERCEL_ENV` decides as
+ * it does for Dolt, with `LIBSQL_PREVIEW_MIGRATE=1` as the Preview opt-in.
  *
  * @param {Record<string, string | undefined>} env
  * @returns {{ migrate: boolean, reason: string }}
  */
 export function libsqlPlan(env) {
   const url = env.TURSO_DATABASE_URL;
-  return typeof url === 'string' && url.trim() !== ''
-    ? { migrate: true, reason: 'TURSO_DATABASE_URL is set' }
-    : { migrate: false, reason: 'TURSO_DATABASE_URL is not set' };
+  if (typeof url !== 'string' || url.trim() === '') {
+    return { migrate: false, reason: 'TURSO_DATABASE_URL is not set' };
+  }
+
+  const target = env.VERCEL_ENV;
+
+  if (target === 'production') return { migrate: true, reason: 'production build' };
+
+  if (target === 'preview') {
+    return env.LIBSQL_PREVIEW_MIGRATE === '1'
+      ? { migrate: true, reason: 'preview build with LIBSQL_PREVIEW_MIGRATE=1' }
+      : {
+          migrate: false,
+          reason: 'preview build; set LIBSQL_PREVIEW_MIGRATE=1 on Preview only when it has its own Turso database',
+        };
+  }
+
+  return { migrate: false, reason: `VERCEL_ENV is ${target ? `"${target}"` : 'not set'}` };
 }
 
 /**

@@ -488,6 +488,65 @@ describe('updateProfile with merge', () => {
   });
 });
 
+describe('schema on first use', () => {
+  it('is applied off Vercel to whatever database TURSO_DATABASE_URL names', async () => {
+    const { listProfiles } = await loadProfiles();
+
+    // The temp file starts empty; nothing ran a migration.
+    expect(await listProfiles()).toEqual([]);
+  });
+
+  it('is left to the build on Vercel, and a missing table names the command that fixes it', async () => {
+    const previous = process.env.VERCEL;
+    process.env.VERCEL = '1';
+    try {
+      const { listProfiles } = await loadProfiles();
+
+      await expect(listProfiles()).rejects.toThrow(/no such table: profiles.*npm run db:migrate:libsql/);
+    } finally {
+      if (previous === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = previous;
+    }
+  });
+});
+
+/**
+ * A plain write that fails with SQLITE_BUSY must not leave anything behind
+ * that breaks later writes. On a client shared between calls, the failed
+ * statement stays in progress on its pooled connection (libsql-client-ts
+ * #352), the next write batch on that connection fails with "cannot commit
+ * transaction - SQL statements in progress" and keeps the write lock, and
+ * from then on every client's writes fail.
+ */
+describe('after a write that lost the lock', () => {
+  it('still creates, merges, deletes, and lets other clients write', async () => {
+    const { createProfile, deleteProfile, getProfile, updateProfile } = await loadProfiles();
+    const kept = await createProfile(VALID_INPUT);
+    const doomed = await createProfile({ ...VALID_INPUT, name: 'Doomed Co' });
+
+    const other = await holdWriteLock(db.url);
+    await expect(createProfile({ ...VALID_INPUT, name: 'Blocked Co' })).rejects.toThrow(/SQLITE_BUSY|locked/);
+    await expect(updateProfile(kept.id, { offer: 'Blocked' })).rejects.toThrow(/SQLITE_BUSY|locked/);
+    await other.release();
+
+    expect(await deleteProfile(doomed.id)).toBe(true);
+    expect(await getProfile(doomed.id)).toBeNull();
+    expect((await createProfile({ ...VALID_INPUT, name: 'After Co' })).name).toBe('After Co');
+    expect(
+      (await updateProfile(kept.id, { models: { research: 'openai/gpt-4.1' } }, { merge: true }))?.models
+    ).toMatchObject({ research: 'openai/gpt-4.1' });
+
+    // Another client, as Mastra's store would be, can still take the lock.
+    const third = createClient({ url: db.url });
+    try {
+      await third.batch([{ sql: 'UPDATE profiles SET offer = ? WHERE id = ?', args: ['Third', kept.id] }], 'write');
+    } finally {
+      third.close();
+    }
+    expect((await getProfile(kept.id))?.offer).toBe('Third');
+  });
+});
+
 describe('deleteProfile', () => {
   it('deletes the profile and the plans saved under it', async () => {
     const { createProfile, deleteProfile, getProfile } = await loadProfiles();

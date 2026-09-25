@@ -10,8 +10,8 @@ import { resetAppDb } from '@/lib/app-db';
  * A fresh libSQL file per test for the app's tables (profiles, saved plans).
  *
  * `useTempAppDb()` points `TURSO_DATABASE_URL` at a new file in a directory of
- * its own and drops the cached client, so the next `appDb()` opens that file
- * and applies the schema, as it does for any local file. The returned cleanup
+ * its own and forgets which databases have their schema, so the next call
+ * applies the schema to that file, as it does for any database off Vercel. The returned cleanup
  * closes the client, restores the variable and tries to remove the directory.
  *
  * Profiles and plans need no Dolt, so nothing here sets `DOLT_*`.

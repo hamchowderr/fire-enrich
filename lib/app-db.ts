@@ -8,98 +8,149 @@
  * It is the same database Mastra's store uses (`lib/libsql-url.mjs`), in
  * tables of its own, so there is nothing extra to provision or configure.
  *
- * The client is separate from Mastra's, on the same url: importing the Mastra
- * instance here would pull every agent into the profile routes, and the
- * planner agent imports this module's callers.
+ * ## One client per call
  *
- * Schema: the Vercel build applies `lib/app-db-schema.mjs` to Turso
- * (`scripts/libsql-migrate.mjs`). For a local file (a fresh clone, the tests)
- * the same idempotent statements are applied here on first use, once per
- * process, so a local run needs no migration step.
+ * Every statement, read or write, runs on a client opened for that call and
+ * closed in a `finally` when the call ends. No client is shared between calls.
+ *
+ * The reason is a defect in the local-file driver of `@libsql/client` 0.18
+ * (https://github.com/tursodatabase/libsql-client-ts/issues/352, open): a
+ * statement that fails with SQLITE_BUSY, whether a plain write or a `BEGIN
+ * IMMEDIATE`, goes back to the client's connection pool still in progress.
+ * Every later transaction or write batch on that connection then fails with
+ * "cannot commit transaction - SQL statements in progress" and keeps the
+ * database's write lock, so writes from every other client, Mastra's store
+ * included, fail until the process restarts. A per-call client takes that
+ * connection with it when it closes. Closing explicitly also releases the
+ * native handle at once, not when the garbage collector reaches it
+ * (https://github.com/tursodatabase/libsql-client-ts/issues/350).
+ *
+ * The cost is small in both modes: a local file opens in well under a
+ * millisecond, and a `libsql:` url is served over HTTP, where a client holds
+ * no socket of its own.
+ *
+ * ## Schema
+ *
+ * The Vercel build applies `lib/app-db-schema.mjs` (`scripts/libsql-migrate.mjs`).
+ * Off Vercel (`next dev`, `next start`, the tests) the same idempotent
+ * statements run here once per process and database, before the first call,
+ * so a local run needs no migration step, with the local file or with a Turso
+ * url from `.env.local`. On Vercel only the build migrates, so a Preview
+ * deployment never changes a database's schema at runtime.
  */
-import { type Client, createClient, type InValue, type Transaction } from '@libsql/client';
+import {
+  type Client,
+  createClient,
+  type InStatement,
+  type InValue,
+  type ResultSet,
+  type Transaction,
+} from '@libsql/client';
 
 import { applyAppDbSchema } from '@/lib/app-db-schema.mjs';
-import { isLocalFileUrl, libsqlConnection } from '@/lib/libsql-url.mjs';
-
-type Handle = { client: Client; ready: Promise<Client> };
+import { libsqlConnection } from '@/lib/libsql-url.mjs';
 
 /**
- * On `globalThis` for the same reason as the Mastra instance: Turbopack
- * re-evaluates route modules on edit, and each evaluation would otherwise open
- * another client on the same database.
+ * The databases whose schema this process has applied, by url. On
+ * `globalThis` so a Turbopack re-evaluation of this module does not apply it
+ * again.
  */
-const globalForDb = globalThis as typeof globalThis & { __fireEnrichAppDb?: Handle };
+const globalForDb = globalThis as typeof globalThis & {
+  __fireEnrichAppDbSchema?: Map<string, Promise<void>>;
+};
 
-function open(): Handle {
+function applied(): Map<string, Promise<void>> {
+  return (globalForDb.__fireEnrichAppDbSchema ??= new Map());
+}
+
+/** Apply the schema to `url` once per process, off Vercel. A failure is not remembered. */
+function ensureSchema(url: string, authToken: string | undefined): Promise<void> {
+  if (process.env.VERCEL) return Promise.resolve();
+
+  let pending = applied().get(url);
+  if (!pending) {
+    pending = (async () => {
+      const client = createClient({ url, authToken });
+      try {
+        await applyAppDbSchema(client);
+      } finally {
+        client.close();
+      }
+    })();
+    pending.catch(() => applied().delete(url));
+    applied().set(url, pending);
+  }
+  return pending;
+}
+
+/**
+ * A table this module owns is missing: the database was never migrated.
+ * Rethrown with the command that fixes it, so the logged 500 names it.
+ */
+function withMigrationHint(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/no such table: (profiles|research_plans)/i.test(message)) return error;
+  return new Error(
+    `${message}. The profile and plan tables are missing from this libSQL database: ` +
+      "run `npm run db:migrate:libsql` with this deployment's TURSO_* variables.",
+    { cause: error }
+  );
+}
+
+/**
+ * Run `work` on a client opened for this call and closed when it ends. See
+ * the module comment for why no client is shared.
+ */
+async function withClient<T>(work: (client: Client) => Promise<T>): Promise<T> {
   const { url, authToken } = libsqlConnection();
+  await ensureSchema(url, authToken);
+
   const client = createClient({ url, authToken });
-  const ready = isLocalFileUrl(url)
-    ? applyAppDbSchema(client).then(() => client)
-    : Promise.resolve(client);
-
-  // A failed schema step is not cached: the next call opens a fresh handle
-  // and tries again rather than failing every request until a restart.
-  ready.catch(() => {
-    if (globalForDb.__fireEnrichAppDb?.client === client) {
-      globalForDb.__fireEnrichAppDb = undefined;
-      client.close();
-    }
-  });
-
-  return { client, ready };
+  try {
+    return await work(client);
+  } catch (error) {
+    throw withMigrationHint(error);
+  } finally {
+    client.close();
+  }
 }
 
 /**
- * The client, with the schema applied when the database is a local file.
- * Opened lazily: importing this module must not open a database, because Next
- * imports route modules at build time.
- */
-export function appDb(): Promise<Client> {
-  globalForDb.__fireEnrichAppDb ??= open();
-  return globalForDb.__fireEnrichAppDb.ready;
-}
-
-/**
- * Close the client and forget it, so the next {@link appDb} opens a new one
- * against whatever `TURSO_DATABASE_URL` says then. For tests, which point each
- * file at its own temporary database.
+ * Forget which databases have had their schema applied, so the next call
+ * applies it to whatever `TURSO_DATABASE_URL` names then. For tests, which
+ * point each case at its own temporary file.
  *
  * @public Used by the tests only.
  */
 export function resetAppDb(): void {
-  globalForDb.__fireEnrichAppDb?.client.close();
-  globalForDb.__fireEnrichAppDb = undefined;
+  applied().clear();
+}
+
+/** Run one statement. */
+export function execute(statement: InStatement): Promise<ResultSet> {
+  return withClient((client) => client.execute(statement));
+}
+
+/** Run statements as one write batch: one transaction, all or nothing. */
+export function batchWrite(statements: InStatement[]): Promise<ResultSet[]> {
+  return withClient((client) => client.batch(statements, 'write'));
 }
 
 /**
  * Run `work` in a write transaction (`BEGIN IMMEDIATE`) on a client of its
- * own, opened for this call and closed after it.
- *
- * A dedicated client rather than the shared one because of how a failed
- * `BEGIN` leaves a connection in `@libsql/client` 0.18: when `BEGIN IMMEDIATE`
- * fails with SQLITE_BUSY, the connection goes back to the client's pool with
- * that statement still in progress, and every later transaction on it fails
- * to commit ("cannot commit transaction - SQL statements in progress"). A
- * caller that retries on SQLITE_BUSY would otherwise poison the shared client
- * for every request. Closing the dedicated client discards the connection.
- *
- * `close()` on the transaction rolls it back unless `work` committed it.
+ * own. `close()` on the transaction rolls it back unless `work` committed it.
  */
-export async function withWriteTransaction<T>(work: (transaction: Transaction) => Promise<T>): Promise<T> {
-  await appDb(); // the schema, for a local file
-  const client = createClient(libsqlConnection());
-
-  try {
+export function withWriteTransaction<T>(
+  work: (transaction: Transaction) => Promise<T>
+): Promise<T> {
+  return withClient(async (client) => {
     const transaction = await client.transaction('write');
     try {
       return await work(transaction);
     } finally {
       transaction.close();
     }
-  } finally {
-    client.close();
-  }
+  });
 }
 
 /** A row as libSQL returns it, keyed by column name. */
@@ -107,7 +158,7 @@ export type Row = Record<string, unknown>;
 
 /** Run a SELECT and return its rows as plain objects. Parameters are always bound. */
 export async function selectRows(sql: string, args: InValue[] = []): Promise<Row[]> {
-  const result = await (await appDb()).execute({ sql, args });
+  const result = await execute({ sql, args });
   return result.rows.map((row) => ({ ...row }));
 }
 

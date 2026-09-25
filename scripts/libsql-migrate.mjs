@@ -12,9 +12,9 @@
  * re-run changes nothing and a failure leaves nothing half-applied.
  *
  * The Vercel build (`scripts/vercel-build.mjs`) runs this after `next build`
- * whenever `TURSO_DATABASE_URL` is set; a failure exits non-zero and fails the
- * deployment. The app applies the same statements itself only to a local
- * file, so a Turso database gets its tables from here.
+ * on production, and on Preview with `LIBSQL_PREVIEW_MIGRATE=1`; a failure
+ * exits non-zero and fails the deployment. Off Vercel the app applies the
+ * same statements itself on first use; on Vercel only this script does.
  *
  * Plain `.mjs`, like the other scripts: it runs under plain Node.
  */
