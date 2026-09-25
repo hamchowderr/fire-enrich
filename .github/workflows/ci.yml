@@ -121,7 +121,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       dolt:
-        image: dolthub/dolt-sql-server:latest
+        # Pinned to the Dolt the tests were written against. The hosted
+        # server's version is unconfirmed; re-pin to it once known.
+        image: dolthub/dolt-sql-server:2.1.8
         env:
           DOLT_ROOT_PASSWORD: ci
           DOLT_ROOT_HOST: '%'

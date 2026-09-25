@@ -88,7 +88,9 @@ deployment. Local `npm run build` is plain `next build` and needs no database.
 The migration runs while the previous deployment still serves traffic, and an
 instant rollback puts old code on the new schema. So every change to
 `db/schema.sql` must be additive and backwards-compatible: add tables, nullable
-columns, columns with defaults, and indexes. Never drop or rename a column or
+columns, columns with defaults, and non-unique indexes. A UNIQUE constraint or
+index is not additive-safe: it fails on existing duplicates and rejects writes
+that old code still makes. Never drop or rename a column or
 table, or tighten a constraint, in the same release as the code that stops
 using it. Do that in a later release, after no live deployment reads it. Every
 statement must stay re-runnable (see the header of `db/schema.sql`).
