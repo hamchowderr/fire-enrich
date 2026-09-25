@@ -102,6 +102,16 @@
     },
     {
       "match": {
+        "userMessage": "Research group: Funding stage",
+        "systemMessage": "You research facts about one company",
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[],\"notes\":\"The research result did not match the expected format, so no findings were kept.\"}"
+      }
+    },
+    {
+      "match": {
         "userMessage": "Research group: Careers page",
         "systemMessage": "You research facts about one company",
         "hasToolResult": false,
