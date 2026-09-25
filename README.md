@@ -13,7 +13,21 @@ Turn a simple list of emails into a rich dataset with company profiles, funding 
 - **Vercel AI Gateway**: One key for every model call
 - **Next.js 15**: Modern React framework with App Router
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fmendableai%2Ffire-enrich&env=FIRECRAWL_API_KEY,AI_GATEWAY_API_KEY&envDescription=API%20keys%20required%20for%20Fire%20Enrich&envLink=https%3A%2F%2Fgithub.com%2Fmendableai%2Ffire-enrich%23required-api-keys)
+## Deploy with Vercel
+
+A deployment needs a Firecrawl API key and a Turso database. The Turso database holds business profiles, saved research plans and Mastra's workflow state. The AI Gateway needs no key on Vercel: the deployment's OIDC token authenticates it. Dolt (run history) is optional, and neither button asks for it.
+
+The two buttons differ only in where the Turso database comes from.
+
+**Turso from the Vercel Marketplace.** The Turso Cloud integration creates a database, or connects one it already manages in your Vercel team, and sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` on the project. The button asks for `FIRECRAWL_API_KEY` only. If the connection is given a custom prefix, the integration sets `<PREFIX>_TURSO_DATABASE_URL` and `<PREFIX>_TURSO_AUTH_TOKEN`, and the app reads that pair too.
+
+[![Deploy with Turso from Vercel Marketplace](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich&project-name=fire-enrich&repository-name=fire-enrich&env=FIRECRAWL_API_KEY&envDescription=Your%20Firecrawl%20API%20key.%20The%20Turso%20integration%20on%20this%20page%20provides%20the%20database.&envLink=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich%23deploy-with-vercel&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22tursocloud%22%2C%22productSlug%22%3A%22database%22%2C%22protocol%22%3A%22storage%22%2C%22allowConnectExistingProduct%22%3Atrue%7D%5D)
+
+**Your own Turso database.** For a database in an existing Turso account. The button asks for `FIRECRAWL_API_KEY`, `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. `turso db show <database> --url` prints the url, and `turso db tokens create <database>` creates a token.
+
+[![Deploy with your own Turso database](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich&project-name=fire-enrich&repository-name=fire-enrich&env=FIRECRAWL_API_KEY,TURSO_DATABASE_URL,TURSO_AUTH_TOKEN&envDescription=Your%20Firecrawl%20API%20key%2C%20and%20the%20database%20url%20and%20auth%20token%20of%20your%20own%20Turso%20database.&envLink=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich%23deploy-with-vercel)
+
+The production build creates the app's tables in the Turso database before the deployment serves traffic.
 
 ## Setup
 

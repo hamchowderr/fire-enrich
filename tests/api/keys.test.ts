@@ -99,7 +99,17 @@ const CHAT_BODY = {
 
 const SCRAPE_BODY = { url: 'https://firecrawl.dev' };
 
-const ENV = ['FIRECRAWL_API_KEY', 'AI_GATEWAY_API_KEY', 'VERCEL_OIDC_TOKEN', 'TURSO_DATABASE_URL', 'DOLT_HOST', 'DOLT_DATABASE', 'DOLT_PASSWORD'] as const;
+const ENV = [
+  'FIRECRAWL_API_KEY',
+  'AI_GATEWAY_API_KEY',
+  'VERCEL_OIDC_TOKEN',
+  'TURSO_DATABASE_URL',
+  'FIRE_TURSO_DATABASE_URL',
+  'FIRE_TURSO_AUTH_TOKEN',
+  'DOLT_HOST',
+  'DOLT_DATABASE',
+  'DOLT_PASSWORD',
+] as const;
 const saved: Partial<Record<(typeof ENV)[number], string | undefined>> = {};
 
 /** The global `@vercel/oidc` reads the request context from (see its `get-context.js`). */
@@ -383,6 +393,20 @@ describe('GET /api/check-env', () => {
       OPENAI_API_KEY: false,
       TURSO_DATABASE_URL: false,
     });
+  });
+
+  it('counts the Turso pair the Marketplace integration sets under a custom prefix, and not half of it', async () => {
+    for (const key of ENV) delete process.env[key];
+    process.env.FIRE_TURSO_DATABASE_URL = 'libsql://prefixed-secret.turso.io';
+
+    expect((await (await checkEnv()).json()).environmentStatus.TURSO_DATABASE_URL).toBe(false);
+
+    process.env.FIRE_TURSO_AUTH_TOKEN = 'prefixed-secret-token';
+    const body = await (await checkEnv()).json();
+
+    expect(body.environmentStatus.TURSO_DATABASE_URL).toBe(true);
+    const text = JSON.stringify(body);
+    for (const secret of ['prefixed-secret.turso.io', 'prefixed-secret-token']) expect(text).not.toContain(secret);
   });
 
   it('reports Dolt as optional and not configured, outside the required settings', async () => {

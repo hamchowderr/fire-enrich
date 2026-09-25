@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { doltConfigState } from '@/lib/dolt-config.mjs';
 import { gatewayConfigured } from '@/lib/gateway-auth';
+import { tursoConfig } from '@/lib/libsql-url.mjs';
 
 /**
  * Reports which variables are set, as booleans only. A value never leaves the
@@ -30,7 +31,9 @@ export async function GET() {
     // The UI reads the gateway's presence under this name; keep it until the
     // UI is repackaged.
     OPENAI_API_KEY: gateway,
-    TURSO_DATABASE_URL: !!process.env.TURSO_DATABASE_URL,
+    // True for either naming `lib/libsql-url.mjs` accepts: TURSO_DATABASE_URL,
+    // or the Marketplace integration's <PREFIX>_TURSO_* pair.
+    TURSO_DATABASE_URL: tursoConfig().state === 'set',
   };
   const dolt = doltConfigState();
   const optional = {

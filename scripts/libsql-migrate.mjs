@@ -10,7 +10,9 @@
  * package.json); a variable already set in the environment wins over both.
  *
  * The database is the one Mastra's store uses (`lib/libsql-url.mjs`): Turso
- * when `TURSO_DATABASE_URL` is set, the local file otherwise. Every statement
+ * when `TURSO_DATABASE_URL` is set (or a `<PREFIX>_TURSO_DATABASE_URL` and
+ * `<PREFIX>_TURSO_AUTH_TOKEN` pair from the Vercel Marketplace integration),
+ * the local file otherwise. Every statement
  * is `IF NOT EXISTS` and they run as one write batch, one transaction, so a
  * re-run changes nothing and a failure leaves nothing half-applied.
  *
