@@ -50,6 +50,15 @@ function clamp01(value: number): number {
 }
 
 /**
+ * A finding with its value withdrawn: what a value with no acceptable evidence
+ * becomes, here and in the evidence-support check (evidence-support.ts). The
+ * UI shows the field as unknown.
+ */
+export function unsupportedFinding(finding: FindingType): FindingType {
+  return { ...finding, value: null, confidence: 0, evidence: [] };
+}
+
+/**
  * Enforce the evidence rule on one group's findings.
  *
  * - findings for fields the group was not asked for are dropped;
@@ -86,7 +95,7 @@ export function checkFindings(
 
     if (finding.value !== null && finding.value !== undefined && evidence.length === 0) {
       notes.push(`"${finding.field}": the value had no evidence from a page read in this group, so it is unknown.`);
-      checked.push({ ...finding, value: null, confidence: 0, evidence: [] });
+      checked.push(unsupportedFinding(finding));
       continue;
     }
 

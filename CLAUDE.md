@@ -125,6 +125,19 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 `POST /api/enrich` runs the `enrichRow` workflow (`lib/mastra/workflows/enrich-row.ts`) per row through `lib/mastra/enrich-adapter.ts`. `POST /api/chat` streams the `chat` agent (`lib/mastra/agents/chat.ts`), which answers from the enriched table or searches the web with the Firecrawl tools.
 
+### Evidence-support check (off by default)
+
+`EVIDENCE_CHECK=1` turns on a second check in the research step, after `checkFindings`: the
+`evidence-support` Classifier (`lib/mastra/evidence-support.ts`, model `typesafe-ai/jev` on the
+AI Gateway, registered on the Mastra instance) asks whether each finding's quote supports its value,
+one call per finding, in parallel. A finding below `EVIDENCE_CHECK_THRESHOLD` (default `0.5`) is
+withdrawn the same way `checkFindings` withdraws one with no read evidence, so it shows as unknown.
+Both are read from `process.env` on every row. The check fails open: an error or a call over 3 s
+keeps the finding and logs one `[EVIDENCE]` warning per group. A cancelled run makes no more calls.
+AIMock cannot serve evaluation models, so tests use a hand-written `Experimental_EvaluationModelV4`
+(`tests/unit/evidence-support.test.ts`) or spy on the registered classifier's model. The AI SDK
+evaluation API is experimental.
+
 ## Conventions & Patterns
 
 - The Fire Enrich Board artifact is built and republished by the braynee `board` skill (`/braynee:board`); the repo has no board script of its own.
