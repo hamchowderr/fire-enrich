@@ -127,4 +127,5 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 ## Conventions & Patterns
 
+- Dolt is optional: it enables versioned run history and run-to-run diffs. Setup for local dev and a VPS (`docker-compose.dolt.yml`, TLS, Vercel env): `docs/dolt-setup.md`.
 - The Fire Enrich Board artifact is built and republished by the braynee `board` skill (`/braynee:board`); the repo has no board script of its own.
