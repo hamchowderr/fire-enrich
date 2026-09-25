@@ -146,7 +146,9 @@ exact certificate as its CA (step 5). No public certificate authority is
 necessary.
 
 Set `DOLT_TLS_HOST` to the name the app will connect to, which is the value of
-`DOLT_HOST`:
+`DOLT_HOST`. A DNS name is the recommended `DOLT_HOST`: the app checks it
+during the TLS handshake, before it sends any credentials (step 5). The name
+needs a DNS record (for example an `A` record) that points at the server.
 
 ```sh
 DOLT_TLS_HOST=dolt.example.com
@@ -158,10 +160,12 @@ chmod 600 deploy/dolt/certs/server.key
 ```
 
 If the app connects by IP address, use `-subj "/CN=203.0.113.10"` and
-`-addext "subjectAltName=IP:203.0.113.10"` (with your address).
+`-addext "subjectAltName=IP:203.0.113.10"` (with your address). Step 5 gives
+the limit of an IP host.
 
 The app refuses a certificate that does not name `DOLT_HOST` (step 5). If
-`DOLT_HOST` changes, make a new certificate for the new name.
+`DOLT_HOST` changes, make a new certificate for the new name, as in
+[Rotating the certificate](#rotating-the-certificate).
 
 `deploy/dolt/dolt.env` and `deploy/dolt/certs/` are gitignored. Do not commit
 them.
@@ -229,8 +233,11 @@ certificate's subject alternative name.
   plaintext password inside TLS. The plugin of the Dolt user does not
   prevent this. For an IP host, only the pinned CA protects the password.
 
-Use a DNS name for `DOLT_HOST` where possible, so that the name is checked
-during the handshake, before any credentials are sent.
+A DNS name is the recommended `DOLT_HOST`, because the name is then checked
+during the handshake, before any credentials are sent. The IP path in
+`lib/dolt-tls.mjs` stays for deployments whose `DOLT_HOST` is an IP address,
+with the limit above. To move an existing deployment from an IP address to a
+DNS name, follow [Rotating the certificate](#rotating-the-certificate).
 
 `scripts/db-migrate.mjs` uses the same checks (`lib/dolt-tls.mjs`).
 
@@ -254,7 +261,9 @@ Set these for Production:
 | `DOLT_TLS_CA_B64` | the output of step 5                         |
 
 With the Vercel CLI, run `vercel env add <NAME> production` once for each
-variable. `DOLT_COMMIT_AUTHOR` is optional (see `.env.example`).
+variable. `DOLT_COMMIT_AUTHOR` is optional (see `.env.example`). The CLI makes
+Production and Preview variables Sensitive by default. To change one later, see
+[Changing a Sensitive variable](#changing-a-sensitive-variable).
 
 Vercel reads environment variables at build time, so redeploy after you set
 them. A production build runs `db:migrate` against this database after
@@ -276,11 +285,121 @@ npm run db:migrate
 Variables set on the command line win over `.env` and `.env.local`. A variable
 left out is read from those files if they set it, so set all six.
 
-### Renewing the certificate
+### Rotating the certificate
 
-The certificate is valid for 825 days. To replace it, repeat step 2, run
-`docker compose -f docker-compose.dolt.yml restart dolt`, repeat step 5, update
-`DOLT_TLS_CA_B64` in Vercel, and redeploy.
+The certificate is valid for 825 days. Replace it before it expires, or when
+`DOLT_HOST` changes, for example from an IP address to a DNS name.
+
+A deployment keeps the `DOLT_TLS_CA_B64` value it was built with. The steps
+below make the app trust the old and the new certificate while the server
+changes over, so the running deployment keeps its connection at every step.
+Each step that changes a variable ends with a redeploy. Wait until the new
+deployment serves traffic before the next step.
+
+1. **Make the new certificate.** Run the step 2 command with the output in
+   `deploy/dolt/certs/new/` (gitignored, like the rest of
+   `deploy/dolt/certs/`). Leave the current `server.crt` and `server.key` in
+   place.
+
+   ```sh
+   DOLT_TLS_HOST=dolt.example.com
+   mkdir -p deploy/dolt/certs/new
+   openssl req -x509 -newkey rsa:4096 -sha256 -days 825 -nodes \
+     -keyout deploy/dolt/certs/new/server.key -out deploy/dolt/certs/new/server.crt \
+     -subj "/CN=$DOLT_TLS_HOST" -addext "subjectAltName=DNS:$DOLT_TLS_HOST"
+   chmod 600 deploy/dolt/certs/new/server.key
+   ```
+
+   For a move from an IP address to a DNS name, name both in the certificate:
+   `-addext "subjectAltName=DNS:$DOLT_TLS_HOST,IP:203.0.113.10"`. Until
+   step 4, the running deployment still connects by the address and checks
+   that the certificate names it. For an IP host that stays an IP host, use
+   the IP variant from step 2.
+
+2. **Trust both certificates.** Set `DOLT_TLS_CA_B64` to a bundle of the old
+   and the new certificate, two PEM blocks in one value, and redeploy:
+
+   ```sh
+   cat deploy/dolt/certs/server.crt deploy/dolt/certs/new/server.crt | base64 -w0; echo
+   ```
+
+   `mysql2` passes `ssl.ca` to Node's TLS, which accepts a server certificate
+   that any certificate in the bundle signed. The new deployment accepts the
+   server before and after step 3.
+
+3. **Swap the server certificate and restart Dolt.** Keep a copy of the old
+   files in `deploy/dolt/certs/old/`, install the new ones, and restart:
+
+   ```sh
+   mkdir -p deploy/dolt/certs/old
+   cp -p deploy/dolt/certs/server.crt deploy/dolt/certs/server.key deploy/dolt/certs/old/
+   cp -p deploy/dolt/certs/new/server.crt deploy/dolt/certs/new/server.key deploy/dolt/certs/
+   docker compose -f docker-compose.dolt.yml restart dolt
+   ```
+
+   Check the certificate the server now presents. `Verify return code: 0 (ok)`
+   means that it chains to the new certificate and names the host:
+
+   ```sh
+   openssl s_client -starttls mysql -connect dolt.example.com:3306 \
+     -CAfile deploy/dolt/certs/server.crt -verify_hostname dolt.example.com </dev/null
+   ```
+
+   For an IP host, use `-verify_ip 203.0.113.10` in place of
+   `-verify_hostname`.
+
+4. **Switch `DOLT_HOST`**, if the rotation moves it to a DNS name. Set
+   `DOLT_HOST` to the new name and redeploy. Skip this step when the name does
+   not change.
+
+5. **Drop the old certificate.** Set `DOLT_TLS_CA_B64` to the new certificate
+   only (the step 5 command) and redeploy.
+
+Update the variables in every place that holds them: Vercel Production and
+Preview, and any other copy that runs `db:migrate` (see step 6). A deployment
+built before step 2 trusts only the old certificate, so it cannot connect after
+step 3. This includes an instant rollback to such a deployment.
+
+`deploy/dolt/certs/old/` holds the old key. Delete it and
+`deploy/dolt/certs/new/` when the rotation is complete and no step needs to be
+undone.
+
+### Changing a Sensitive variable
+
+The Vercel CLI makes Production and Preview variables Sensitive by default
+(`vercel env add --help`, and "Sensitive" in the
+[`vercel env` reference](https://vercel.com/docs/cli/env)). A Sensitive value
+cannot be read back from the dashboard or with `vercel env ls`
+([Sensitive environment variables](https://vercel.com/docs/environment-variables/sensitive-environment-variables)),
+so set it from the same file everywhere it is used.
+
+`vercel env update` can refuse a Sensitive variable with `cannot change the
+key of a Sensitive Environment Variable`. The dashboard's **Edit** action can
+change a Sensitive value in place. With the CLI, replace the variable with
+`vercel env rm`, then `vercel env add`:
+
+```sh
+base64 -w0 deploy/dolt/certs/server.crt > deploy/dolt/certs/ca.b64
+vercel env rm DOLT_TLS_CA_B64 production --yes
+vercel env add DOLT_TLS_CA_B64 production < deploy/dolt/certs/ca.b64
+vercel env rm DOLT_TLS_CA_B64 preview --yes
+vercel env add DOLT_TLS_CA_B64 preview "" < deploy/dolt/certs/ca.b64
+```
+
+For Preview, the third argument is the Git branch. Without it, a
+non-interactive `vercel env add` stops and asks for a branch
+(`git_branch_required`). The empty argument `""` applies the variable to all
+Preview branches. An interactive run asks for the branch instead: leave the
+answer empty for all Preview branches.
+
+A change to an environment variable applies only to new deployments
+([Environment variables](https://vercel.com/docs/environment-variables)), and
+Vercel reads the values at build time. Redeploy after each change. To rebuild
+the current production deployment with the new values:
+
+```sh
+vercel redeploy <production-deployment-url> --target production
+```
 
 ### Upgrading Dolt
 
