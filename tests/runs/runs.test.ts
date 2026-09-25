@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { EnrichmentResult } from '@/lib/types';
 
@@ -47,6 +47,11 @@ const enrichment = (overrides: Partial<EnrichmentResult> = {}): EnrichmentResult
 
 /** The run id a started run was given, read from its branch connection. */
 const branchOf = (runId: string) => `fire_enrich/run/${runId}`;
+
+// Every test imports a fresh `lib/runs`, but only the first one would load its
+// dependencies from disk, inside that test's 5 s, and under load it timed out.
+// Load them once here; a later `loadRuns()` evaluates only the app's modules.
+beforeAll(() => import('@/lib/runs'), 60_000);
 
 beforeEach(() => {
   restoreEnv = isolateDoltEnv();
