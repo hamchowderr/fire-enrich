@@ -129,7 +129,7 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 `EVIDENCE_CHECK=1` turns on a second check in the research step, after `checkFindings`: the
 `evidence-support` Classifier (`lib/mastra/evidence-support.ts`, model `typesafe-ai/jev` on the
-AI Gateway, registered on the Mastra instance) asks whether each finding's quote supports its value,
+AI Gateway, registered on the Mastra instance; traced only when observability is configured) asks whether each finding's quote supports its value,
 one call per finding, in parallel. A finding below `EVIDENCE_CHECK_THRESHOLD` (default `0.5`) is
 withdrawn the same way `checkFindings` withdraws one with no read evidence, so it shows as unknown.
 Both are read from `process.env` on every row. The check fails open: an error or a call over 3 s

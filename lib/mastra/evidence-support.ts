@@ -69,7 +69,10 @@ export function createEvidenceSupportClassifier(model: EvaluationModel) {
   return new Classifier({ id: 'evidence-support', model, questions: QUESTIONS });
 }
 
-/** Registered on the Mastra instance, so every evaluation is traced. */
+/**
+ * Registered on the Mastra instance, so its evaluations are traced when
+ * observability is configured (e.g. in Studio).
+ */
 export const evidenceSupportClassifier = createEvidenceSupportClassifier(
   gateway.evaluationModel(EVIDENCE_MODEL_ID)
 );
