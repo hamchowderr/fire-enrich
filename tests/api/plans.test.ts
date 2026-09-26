@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import plannerFixtures from '../../fixtures/planner-plan.json';
-import { TEMP_APP_DB_TIMEOUT, useTempAppDb } from '../app-db/temp-db';
+import { useTempAppDb } from '../app-db/temp-db';
 import { isolateDoltEnv } from '../runs/fake-dolt';
 
 /**
@@ -16,8 +16,6 @@ import { isolateDoltEnv } from '../runs/fake-dolt';
  * removes the plan row and nothing else, and the field-set lookup behind plan
  * reuse.
  */
-vi.setConfig({ testTimeout: TEMP_APP_DB_TIMEOUT });
-
 let db: ReturnType<typeof useTempAppDb>;
 let restoreDolt: () => void;
 

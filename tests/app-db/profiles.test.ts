@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_MODEL_IDS } from '@/lib/mastra/models';
 
-import { holdWriteLock, TEMP_APP_DB_TIMEOUT, useTempAppDb } from './temp-db';
+import { holdWriteLock, useTempAppDb } from './temp-db';
 import { isolateDoltEnv } from '../runs/fake-dolt';
 
 /**
@@ -15,8 +15,6 @@ import { isolateDoltEnv } from '../runs/fake-dolt';
  * and the concurrency of `?merge=true`, driven by a second client that holds
  * the database's write lock the way another request would.
  */
-vi.setConfig({ testTimeout: TEMP_APP_DB_TIMEOUT });
-
 let db: ReturnType<typeof useTempAppDb>;
 let restoreDolt: () => void;
 
