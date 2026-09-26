@@ -292,12 +292,16 @@ The certificate is valid for 825 days. Replace it before it expires, or when
 
 A deployment keeps the `DOLT_TLS_CA_B64` value it was built with. The steps
 below make the app trust the old and the new certificate while the server
-changes over, so the running deployment keeps its connection at every step.
-Each step that changes a variable ends with a redeploy. Wait until the new
-deployment serves traffic before the next step.
+changes over, so the running deployment can reconnect after every step. The
+restart in step 3 closes open connections, so there is a brief interruption
+while Dolt restarts. Each step that changes a variable ends with a redeploy.
+Wait until the new deployment serves traffic before the next step.
 
-1. **Make the new certificate.** Run the step 2 command with the output in
-   `deploy/dolt/certs/new/` (gitignored, like the rest of
+"Setup step N" below means step N of the setup above (steps 1 to 6). "Step N"
+alone means a step of the rotation.
+
+1. **Make the new certificate.** Run the setup step 2 command with the output
+   in `deploy/dolt/certs/new/` (gitignored, like the rest of
    `deploy/dolt/certs/`). Leave the current `server.crt` and `server.key` in
    place.
 
@@ -313,8 +317,9 @@ deployment serves traffic before the next step.
    For a move from an IP address to a DNS name, name both in the certificate:
    `-addext "subjectAltName=DNS:$DOLT_TLS_HOST,IP:203.0.113.10"`. Until
    step 4, the running deployment still connects by the address and checks
-   that the certificate names it. For an IP host that stays an IP host, use
-   the IP variant from step 2.
+   that the certificate names it. The name needs a DNS record that points at
+   the server and resolves before the check in step 3 and before step 4. For
+   an IP host that stays an IP host, use the IP variant from setup step 2.
 
 2. **Trust both certificates.** Set `DOLT_TLS_CA_B64` to a bundle of the old
    and the new certificate, two PEM blocks in one value, and redeploy:
@@ -346,19 +351,24 @@ deployment serves traffic before the next step.
    ```
 
    For an IP host, use `-verify_ip 203.0.113.10` in place of
-   `-verify_hostname`.
+   `-verify_hostname`. For a move from an IP address to a DNS name, run the
+   check twice, once with `-verify_hostname dolt.example.com` and once with
+   `-verify_ip 203.0.113.10`: until step 4 the running deployment connects by
+   the address, and a certificate without the `IP:` entry passes the name
+   check but breaks that deployment.
 
-4. **Switch `DOLT_HOST`**, if the rotation moves it to a DNS name. Set
-   `DOLT_HOST` to the new name and redeploy. Skip this step when the name does
+4. **Switch `DOLT_HOST`**, if the rotation moves it to a DNS name. Confirm
+   that the name resolves to the server, then set `DOLT_HOST` to the new name
+   and redeploy. Skip this step when the name does
    not change.
 
 5. **Drop the old certificate.** Set `DOLT_TLS_CA_B64` to the new certificate
-   only (the step 5 command) and redeploy.
+   only (the setup step 5 command) and redeploy.
 
 Update the variables in every place that holds them: Vercel Production and
-Preview, and any other copy that runs `db:migrate` (see step 6). A deployment
-built before step 2 trusts only the old certificate, so it cannot connect after
-step 3. This includes an instant rollback to such a deployment.
+Preview, and any other copy that runs `db:migrate` (see setup step 6). A
+deployment built before step 2 trusts only the old certificate, so it cannot
+connect after step 3. This includes an instant rollback to such a deployment.
 
 `deploy/dolt/certs/old/` holds the old key. Delete it and
 `deploy/dolt/certs/new/` when the rotation is complete and no step needs to be
@@ -376,7 +386,8 @@ so set it from the same file everywhere it is used.
 `vercel env update` can refuse a Sensitive variable with `cannot change the
 key of a Sensitive Environment Variable`. The dashboard's **Edit** action can
 change a Sensitive value in place. With the CLI, replace the variable with
-`vercel env rm`, then `vercel env add`:
+`vercel env rm`, then `vercel env add`. Between the two commands the variable
+does not exist, so do not deploy until `vercel env add` has completed:
 
 ```sh
 base64 -w0 deploy/dolt/certs/server.crt > deploy/dolt/certs/ca.b64
