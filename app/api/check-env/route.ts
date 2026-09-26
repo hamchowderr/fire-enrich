@@ -24,14 +24,11 @@ export async function GET() {
   // On Vercel the AI Gateway authenticates with the deployment's OIDC token
   // and no key is set; `gatewayConfigured` counts either credential, reading
   // the token the way the gateway does (request context, then environment).
-  const gateway = gatewayConfigured();
+  // `AI_GATEWAY_API_KEY` is the gateway's status: true with either credential.
   const turso = tursoConfig();
   const environmentStatus = {
     FIRECRAWL_API_KEY: !!process.env.FIRECRAWL_API_KEY,
-    AI_GATEWAY_API_KEY: gateway,
-    // The UI reads the gateway's presence under this name; keep it until the
-    // UI is repackaged.
-    OPENAI_API_KEY: gateway,
+    AI_GATEWAY_API_KEY: gatewayConfigured(),
     // True for either naming `lib/libsql-url.mjs` accepts: TURSO_DATABASE_URL,
     // or the Marketplace integration's <PREFIX>_TURSO_* pair. A partial or
     // ambiguous configuration is false here and detailed under `turso`.

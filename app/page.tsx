@@ -55,12 +55,11 @@ export default function HomePage() {
   const [isCheckingEnv, setIsCheckingEnv] = useState(true);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [firecrawlApiKey, setFirecrawlApiKey] = useState<string>("");
-  const [openaiApiKey, setOpenaiApiKey] = useState<string>("");
   const [isValidatingApiKey, setIsValidatingApiKey] = useState(false);
   const [missingKeys, setMissingKeys] = useState<{
     firecrawl: boolean;
-    openai: boolean;
-  }>({ firecrawl: false, openai: false });
+    gateway: boolean;
+  }>({ firecrawl: false, gateway: false });
   const [pendingCSVData, setPendingCSVData] = useState<{
     rows: CSVRow[];
     columns: string[];
@@ -76,21 +75,12 @@ export default function HomePage() {
         }
         const data = await response.json();
         const hasFirecrawl = data.environmentStatus.FIRECRAWL_API_KEY;
-        const hasOpenAI = data.environmentStatus.OPENAI_API_KEY;
 
         if (!hasFirecrawl) {
           // Check localStorage for saved API key
           const savedKey = localStorage.getItem("firecrawl_api_key");
           if (savedKey) {
             setFirecrawlApiKey(savedKey);
-          }
-        }
-
-        if (!hasOpenAI) {
-          // Check localStorage for saved API key
-          const savedKey = localStorage.getItem("openai_api_key");
-          if (savedKey) {
-            setOpenaiApiKey(savedKey);
           }
         }
       } catch (error) {
@@ -108,19 +98,17 @@ export default function HomePage() {
     const response = await fetch("/api/check-env");
     const data = await response.json();
     const hasFirecrawl = data.environmentStatus.FIRECRAWL_API_KEY;
-    const hasOpenAI = data.environmentStatus.OPENAI_API_KEY;
+    // The AI Gateway authenticates on the server only (AI_GATEWAY_API_KEY, or
+    // the deployment's OIDC token on Vercel), so there is no key to enter here.
+    const hasGateway = data.environmentStatus.AI_GATEWAY_API_KEY;
     const savedFirecrawlKey = localStorage.getItem("firecrawl_api_key");
-    const savedOpenAIKey = localStorage.getItem("openai_api_key");
 
-    if (
-      (!hasFirecrawl && !savedFirecrawlKey) ||
-      (!hasOpenAI && !savedOpenAIKey)
-    ) {
+    if ((!hasFirecrawl && !savedFirecrawlKey) || !hasGateway) {
       // Save the CSV data temporarily and show API key modal
       setPendingCSVData({ rows, columns });
       setMissingKeys({
         firecrawl: !hasFirecrawl && !savedFirecrawlKey,
-        openai: !hasOpenAI && !savedOpenAIKey,
+        gateway: !hasGateway,
       });
       setShowApiKeyModal(true);
     } else {
@@ -159,20 +147,13 @@ export default function HomePage() {
     const response = await fetch("/api/check-env");
     const data = await response.json();
     const hasEnvFirecrawl = data.environmentStatus.FIRECRAWL_API_KEY;
-    const hasEnvOpenAI = data.environmentStatus.OPENAI_API_KEY;
+    const hasGateway = data.environmentStatus.AI_GATEWAY_API_KEY;
     const hasSavedFirecrawl = localStorage.getItem("firecrawl_api_key");
-    const hasSavedOpenAI = localStorage.getItem("openai_api_key");
 
     const needsFirecrawl = !hasEnvFirecrawl && !hasSavedFirecrawl;
-    const needsOpenAI = !hasEnvOpenAI && !hasSavedOpenAI;
 
     if (needsFirecrawl && !firecrawlApiKey.trim()) {
       toast.error("Please enter a valid Firecrawl API key");
-      return;
-    }
-
-    if (needsOpenAI && !openaiApiKey.trim()) {
-      toast.error("Please enter a valid OpenAI API key");
       return;
     }
 
@@ -198,9 +179,12 @@ export default function HomePage() {
         localStorage.setItem("firecrawl_api_key", firecrawlApiKey);
       }
 
-      // Save OpenAI API key if provided
-      if (openaiApiKey) {
-        localStorage.setItem("openai_api_key", openaiApiKey);
+      // Only the server can configure the gateway; stay on the dialog, which
+      // now shows the gateway alone.
+      if (!hasGateway) {
+        setMissingKeys({ firecrawl: false, gateway: true });
+        toast.error("The AI Gateway is not configured on the server.");
+        return;
       }
 
       toast.success("API keys saved successfully!");
@@ -422,10 +406,10 @@ export default function HomePage() {
           style={{ backgroundColor: "var(--accent-white)" }}
         >
           <DialogHeader>
-            <DialogTitle>API Keys Required</DialogTitle>
+            <DialogTitle>Configuration Required</DialogTitle>
             <DialogDescription>
-              This tool requires API keys for Firecrawl and OpenAI to enrich
-              your CSV data.
+              Enrichment needs a Firecrawl API key and access to the Vercel AI
+              Gateway.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
@@ -459,40 +443,28 @@ export default function HomePage() {
               </>
             )}
 
-            {missingKeys.openai && (
+            {missingKeys.gateway && (
               <>
+                <div className="flex flex-col gap-2">
+                  <p className="text-body-small font-medium">Vercel AI Gateway</p>
+                  <p className="text-body-small text-black-alpha-64">
+                    Model calls go through the Vercel AI Gateway, which is
+                    configured on the server, not in this dialog. Set
+                    AI_GATEWAY_API_KEY for local development. A Vercel
+                    deployment authenticates with its OIDC token.
+                  </p>
+                </div>
                 <Button
                   onClick={() =>
-                    window.open(
-                      "https://platform.openai.com/api-keys",
-                      "_blank",
-                    )
+                    window.open("https://vercel.com/docs/ai-gateway", "_blank")
                   }
                   variant="secondary"
                   size="default"
                   className="flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <ExternalLink style={{ width: '20px', height: '20px', minWidth: '20px', minHeight: '20px' }} />
-                  Get OpenAI API Key
+                  AI Gateway documentation
                 </Button>
-                <div className="flex flex-col gap-2">
-                  <label htmlFor="openai-key" className="text-body-small font-medium">
-                    OpenAI API Key
-                  </label>
-                  <Input
-                    id="openai-key"
-                    type="password"
-                    placeholder="sk-..."
-                    value={openaiApiKey}
-                    onChange={(e) => setOpenaiApiKey(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !isValidatingApiKey) {
-                        handleApiKeySubmit();
-                      }
-                    }}
-                    disabled={isValidatingApiKey}
-                  />
-                </div>
               </>
             )}
           </div>
@@ -504,6 +476,7 @@ export default function HomePage() {
             >
               Cancel
             </Button>
+            {missingKeys.firecrawl && (
             <Button
               onClick={handleApiKeySubmit}
               disabled={isValidatingApiKey || !firecrawlApiKey.trim()}
@@ -518,6 +491,7 @@ export default function HomePage() {
                 "Submit"
               )}
             </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
