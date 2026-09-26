@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { badRequest, notFound, parseJsonBody } from '@/lib/api/profiles-http';
+import { flushTracesAfter } from '@/lib/flush-traces';
 import { mastra } from '@/lib/mastra';
 import {
   normalizePlanNames,
@@ -109,6 +110,8 @@ export async function POST(request: NextRequest) {
     if (audience) requestContext.set('audience', audience);
     setPlannerProfile(requestContext, profile);
 
+    // The planner's trace spans are written once the response is sent.
+    flushTracesAfter();
     const result = await mastra.getAgent('planner').generate(goal, {
       requestContext,
       structuredOutput: { schema: ResearchPlan },

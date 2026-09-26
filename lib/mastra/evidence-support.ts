@@ -27,9 +27,20 @@
  * keeps the finding unchecked and logs one warning line for the group, so an
  * outage never blanks a row. A cancelled run makes no further calls and keeps
  * what it has without a warning.
+ *
+ * ## Tracing
+ *
+ * Given the step's tracing context, each check is recorded as a child span
+ * `evidence-support: <field>` of the research step. Its input is the field,
+ * the value and the quote (each cut to {@link MAX_TRACED_CHARS}); its output
+ * and metadata carry the probability, the threshold and the decision: `kept`,
+ * `dropped`, `failed` (kept unchecked) or `cancelled`. The classifier's own
+ * `CLASSIFIER_EVALUATION` span, which records model, tokens and duration but no
+ * answers, runs inside it and so nests under it.
  */
 import { gateway } from '@ai-sdk/gateway';
 import { Classifier } from '@mastra/core/classifier';
+import { executeWithContext, SpanType, type AnySpan, type TracingContext } from '@mastra/core/observability';
 
 import { unsupportedFinding } from './mappers';
 import type { FindingType } from './schemas';
@@ -44,6 +55,13 @@ const DEFAULT_TIMEOUT_MS = 3_000;
 
 /** One retry on a retryable gateway error, then fail open. */
 const MAX_RETRIES = 1;
+
+/**
+ * Longest value or quote recorded on a check's span, in characters.
+ *
+ * @public Tests check the cut against it.
+ */
+export const MAX_TRACED_CHARS = 500;
 
 const QUESTIONS = {
   supported: {
@@ -106,9 +124,16 @@ interface EvidenceCheckOptions {
   /** The run's signal: once it fires, no further calls are made. */
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  /** The research step's tracing context; each check becomes a child span of it. */
+  tracingContext?: TracingContext;
 }
 
-type Outcome = { kind: 'kept' } | { kind: 'dropped'; probability: number } | { kind: 'failed'; error: unknown };
+type Outcome =
+  | { kind: 'kept'; probability?: number }
+  | { kind: 'dropped'; probability: number }
+  | { kind: 'failed'; error: unknown };
+
+type Decision = 'kept' | 'dropped' | 'failed' | 'cancelled';
 
 function hasValue(finding: FindingType): boolean {
   return finding.value !== null && finding.value !== undefined && finding.evidence.length > 0;
@@ -129,6 +154,41 @@ function describeError(error: unknown): string {
   return String(error);
 }
 
+/** `text` cut to `max` characters, with an ellipsis and the full length when cut. */
+function truncate(text: string, max = MAX_TRACED_CHARS): string {
+  return text.length <= max ? text : `${text.slice(0, max)}… (${text.length} chars)`;
+}
+
+function tracedValue(value: FindingType['value']): unknown {
+  if (typeof value === 'string') return truncate(value);
+  if (Array.isArray(value)) return value.map((item) => truncate(item));
+  return value;
+}
+
+/** Record a check's result on its span and end it. */
+function endCheckSpan(
+  span: AnySpan | undefined,
+  field: string,
+  outcome: Outcome,
+  threshold: number,
+  aborted: boolean
+): void {
+  if (!span) return;
+  const decision: Decision = outcome.kind === 'failed' && aborted ? 'cancelled' : outcome.kind;
+  const probability = outcome.kind === 'failed' ? null : (outcome.probability ?? null);
+  const error = outcome.kind === 'failed' && !aborted ? describeError(outcome.error) : undefined;
+  span.end({
+    output: { decision, probability },
+    metadata: {
+      field,
+      probability,
+      threshold,
+      decision,
+      ...(error ? { error } : {}),
+    },
+  });
+}
+
 /**
  * Keep each finding whose quote supports its value; turn the rest into "no
  * value", as `checkFindings` does. Findings without a value pass through
@@ -140,7 +200,7 @@ export async function checkEvidenceSupport(
   findings: readonly FindingType[],
   options: EvidenceCheckOptions
 ): Promise<{ findings: FindingType[]; notes: string[] }> {
-  const { classifier, threshold, fieldDescriptions, groupId, abortSignal } = options;
+  const { classifier, threshold, fieldDescriptions, groupId, abortSignal, tracingContext } = options;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   if (abortSignal?.aborted) return { findings: [...findings], notes: [] };
@@ -152,26 +212,42 @@ export async function checkEvidenceSupport(
       const signal = abortSignal
         ? AbortSignal.any([abortSignal, AbortSignal.timeout(timeoutMs)])
         : AbortSignal.timeout(timeoutMs);
+      const quote = finding.evidence.map((item) => item.quote).join('\n');
 
+      const span = tracingContext?.currentSpan?.createChildSpan({
+        type: SpanType.GENERIC,
+        name: `evidence-support: ${finding.field}`,
+        input: { field: finding.field, value: tracedValue(finding.value), quote: truncate(quote) },
+        metadata: { field: finding.field, threshold },
+      });
+
+      let outcome: Outcome;
       try {
-        const result = await untilAborted(
-          classifier.evaluate({
-            state: {
-              field: finding.field,
-              fieldDescription: fieldDescriptions.get(finding.field) ?? '',
-              value: finding.value,
-              quote: finding.evidence.map((item) => item.quote).join('\n'),
-            },
-            abortSignal: signal,
-            maxRetries: MAX_RETRIES,
-          }),
-          signal
-        );
+        // Run inside the span, so the classifier's own span nests under it.
+        const result = await executeWithContext({
+          span,
+          fn: () =>
+            untilAborted(
+              classifier.evaluate({
+                state: {
+                  field: finding.field,
+                  fieldDescription: fieldDescriptions.get(finding.field) ?? '',
+                  value: finding.value,
+                  quote,
+                },
+                abortSignal: signal,
+                maxRetries: MAX_RETRIES,
+              }),
+              signal
+            ),
+        });
         const probability = result.answers.supported.probability;
-        return probability >= threshold ? { kind: 'kept' } : { kind: 'dropped', probability };
+        outcome = probability >= threshold ? { kind: 'kept', probability } : { kind: 'dropped', probability };
       } catch (error) {
-        return { kind: 'failed', error };
+        outcome = { kind: 'failed', error };
       }
+      endCheckSpan(span, finding.field, outcome, threshold, abortSignal?.aborted ?? false);
+      return outcome;
     })
   );
 

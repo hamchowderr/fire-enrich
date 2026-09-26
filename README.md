@@ -62,6 +62,9 @@ Do not point a local `.env.local` at the production Turso database: local runs c
 | `FIRECRAWL_API_URL` | `https://api.firecrawl.dev` | Firecrawl API origin, for a self-hosted Firecrawl. |
 | `EVIDENCE_CHECK` | off | `1` turns on a second evidence check: an evaluation model (`typesafe-ai/jev` on the AI Gateway) scores whether each finding's quote supports its value. The AI SDK evaluation API it uses is experimental. |
 | `EVIDENCE_CHECK_THRESHOLD` | `0.5` | Score, from 0 to 1, a finding needs to be kept when `EVIDENCE_CHECK=1`. A finding below it is left unknown. |
+| `TRACING` | on | `0`, `false`, `off`, `no` or `disabled` turns tracing off. On, workflow runs, agent and tool calls and evidence-support checks are recorded as trace spans in the Turso database (or the local file). See [Traces](#traces). |
+| `TRACING_SAMPLE_RATE` | `1` | Share of traces kept, from 0 to 1. Each trace is kept or dropped whole. |
+| `TRACING_RETENTION_DAYS` | `14` | Days a trace span is kept before it is deleted. `0` keeps spans forever. |
 | `DEFAULT_PROFILE_ID` | newest profile | Business profile the planner uses when a request names none. Profiles are created with `POST /api/profiles`. With no profiles, the planner uses a generic one. |
 | `LIBSQL_PREVIEW_MIGRATE` | unset | `1` also creates the app's Turso tables on Vercel Preview builds. Set it only when Preview uses a different Turso database from Production. |
 | `UPSTASH_REDIS_REST_URL` | unset | With `UPSTASH_REDIS_REST_TOKEN`, limits each IP to 50 `/api/scrape` requests a day. Unset: no rate limiting. |
@@ -152,6 +155,29 @@ Requirements: Node.js 24 and npm.
 5. Open [http://localhost:3000](http://localhost:3000). The upload page links a sample CSV (`public/sample-data.csv`).
 
 `npm run studio` starts [Mastra Studio](https://mastra.ai/docs) on the agents and workflows in `lib/mastra`.
+
+### Traces
+
+With tracing on (the default), each enrichment row is a trace: the `enrichRow` workflow, its steps, the agents' model and tool calls (without a span per streamed chunk), and one `evidence-support: <field>` span per finding checked when `EVIDENCE_CHECK=1`. That span records the field, the probability of support, the threshold and the decision (`kept`, `dropped`, `failed` or `cancelled`), with the value and quote cut to 500 characters. The planner and chat agents record traces of their own. Spans are written to the `mastra_ai_spans` table of the libSQL database that `TURSO_DATABASE_URL` names, or of the local file when it is unset. Each route writes its remaining spans in `after()`, once the response has ended.
+
+**What a span stores.** Its input and output: the prompts (which contain the row's email address and the chat panel's table), tool arguments and results (page text), the workflow's input (the row's other columns) and output (the enriched values), plus metadata and attributes (model, tokens, timings). Before a span is stored:
+
+- Email addresses are masked to `***@domain` everywhere in the span, including addresses printed on the pages the tools read. The domain is kept because it names the company the row is about.
+- Keys such as `apiKey`, `token` and `password` are redacted by Mastra's default `SensitiveDataFilter`.
+- Page text from `firecrawl-search` and `firecrawl-scrape` is cut to 2,000 characters per page, and any other string to 16,000 characters.
+
+Other values in a row, such as names or phone numbers, are stored as they are.
+
+**Retention.** Spans older than `TRACING_RETENTION_DAYS` (default 14) are deleted with the store's `prune()`. The prune runs after a route's response, at most once an hour per server instance and at most 5,000 spans at a time, so it needs no scheduler or extra setting. Deleted rows free space inside the database file for new rows; the file does not shrink.
+
+**Size.** Estimated from the tool budgets (a scrape returns up to 40,000 characters of page text, a search up to 8,000) and a one-row trace on the test fixtures: a typical row, with the identify step and three research groups making about ten searches and three scrapes, stores about 180,000 characters of span data, against about 300,000 without the page-text cut. A row that spends every step on a full-page scrape stores about 260,000 against 1.5 million; one that spends every step on searches, about 450,000 either way. The levers are `TRACING_SAMPLE_RATE`, `TRACING_RETENTION_DAYS` and `TRACING=0`.
+
+Workflow run snapshots (`mastra_workflow_snapshot`, written by Mastra for every run whether or not tracing is on) also hold each row's input, including its email address, and are not pruned.
+
+**Viewing traces.** Run Studio with the database you want to read and open Observability, then Traces:
+
+- Local: `npm run studio`. With no `TURSO_*` values it reads `.mastra/fire-enrich.db`, the file `npm run dev` writes.
+- Production: put the production `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in a separate file, for example `.env.traces.local` (git ignores `.env*.local`), with `TRACING=0` in it, and run `npx mastra dev --dir lib/mastra --env .env.traces.local`. With `--env`, Studio reads only that file. `TRACING=0` keeps what you do in Studio from writing new spans to production. Do not put production values in `.env.local`: `npm run dev`, `npm run studio` without `--env` and the database scripts read it, and local runs create tables at first use.
 
 The build, test and lint commands, the test harness, and the rules for database schema changes are in [CLAUDE.md](CLAUDE.md). `npm run check` runs what CI runs.
 

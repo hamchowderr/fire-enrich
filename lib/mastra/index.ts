@@ -10,6 +10,7 @@ import { plannerAgent } from './agents/planner';
 import { researchAgent } from './agents/research';
 import { evidenceSupportClassifier } from './evidence-support';
 import { configureAIMock } from './lib/aimock';
+import { createObservability, tracingConfig, tracingRetention } from './tracing';
 import { enrichRowWorkflow } from './workflows/enrich-row';
 
 // Route OpenAI-compatible clients at AIMock when `USE_AIMOCK=true`. Runs before
@@ -20,6 +21,8 @@ import { enrichRowWorkflow } from './workflows/enrich-row';
 configureAIMock();
 
 function createMastra() {
+  const tracing = tracingConfig();
+
   return new Mastra({
     /**
      * LibSQL serves both deployment shapes from one adapter.
@@ -34,8 +37,23 @@ function createMastra() {
      * (profiles and saved plans, `lib/app-db.ts`) read too: one database for
      * both. The local file is only resolved on the fallback path, so a
      * deployment using Turso never touches the filesystem.
+     *
+     * `retention` expires trace spans after `TRACING_RETENTION_DAYS` (default
+     * 14) when `lib/flush-traces.ts` calls `prune()`; nothing else is pruned.
      */
-    storage: new LibSQLStore({ id: 'fire-enrich-storage', ...libsqlConnection() }),
+    storage: new LibSQLStore({
+      id: 'fire-enrich-storage',
+      ...libsqlConnection(),
+      retention: tracingRetention(tracing),
+    }),
+    /**
+     * Traces of workflow runs, agent and tool calls and evidence-support checks,
+     * written to the storage above (`mastra_ai_spans`) and read by Studio.
+     * Undefined with `TRACING=0`; sampled by `TRACING_SAMPLE_RATE`; email
+     * addresses masked and page text cut before storage. Routes flush the
+     * buffer with `flushTracesAfter` (`lib/flush-traces.ts`). See tracing.ts.
+     */
+    observability: createObservability(tracing),
     agents: {
       /**
        * Attached by the research agent as its `agent-browser` sub-agent tool,
@@ -54,8 +72,8 @@ function createMastra() {
     },
     /**
      * Asked by the research step whether a finding's quote supports its value,
-     * when EVIDENCE_CHECK is on. Registered so its evaluations are traced when
-     * observability is configured (e.g. in Studio); this app configures none.
+     * when EVIDENCE_CHECK is on. Registered so its evaluations are traced
+     * through the observability above.
      */
     classifiers: {
       evidenceSupport: evidenceSupportClassifier,

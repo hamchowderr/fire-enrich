@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { flushTracesAfter } from '@/lib/flush-traces';
 import { gatewayConfigured } from '@/lib/gateway-auth';
 import { mastra } from '@/lib/mastra';
 import { chatContextMessage, type ChatTableContext } from '@/lib/mastra/agents/chat';
@@ -85,6 +86,11 @@ export async function POST(request: NextRequest) {
       ...historyMessages(conversationHistory),
       { role: 'user' as const, content: chatContextMessage(question, (context ?? {}) as ChatTableContext) },
     ];
+
+    // Settles when the stream ends; the agent's trace spans are written then,
+    // off the response path.
+    const streamEnded = Promise.withResolvers<void>();
+    flushTracesAfter(streamEnded.promise);
 
     // Create streaming response
     const encoder = new TextEncoder();
@@ -175,6 +181,7 @@ export async function POST(request: NextRequest) {
           });
         } finally {
           activeQueries.delete(queryId);
+          streamEnded.resolve();
           closed = true;
           controller.close();
         }
