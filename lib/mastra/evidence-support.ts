@@ -17,7 +17,13 @@
  *
  * Read from the environment on every call, like the other switches in this app:
  *
- * - `EVIDENCE_CHECK`: `1` or `true` turns the check on. Off by default.
+ * - `EVIDENCE_CHECK`: off by default. `1`, `true`, `on`, `yes` or `enabled`
+ *   turns the check on; `0`, `false`, `off`, `no` or `disabled` turns it off
+ *   (trimmed, any case). An empty or unrecognised value uses the default.
+ *   On held-out findings it dropped no correct value but also kept the wrong
+ *   values that real runs produced (tests/evidence), so it stays off.
+ * - Cost: when on, each finding with a value is one paid gateway call per
+ *   run, and a failing or slow call can add up to the 3 s timeout per group.
  * - `EVIDENCE_CHECK_THRESHOLD`: the probability a finding needs to be kept,
  *   in [0, 1]. Default 0.5; anything unparsable or out of range uses it.
  *
@@ -34,10 +40,27 @@ import { Classifier } from '@mastra/core/classifier';
 import { unsupportedFinding } from './mappers';
 import type { FindingType } from './schemas';
 
-/** Gateway id of the evaluation model. `jev-latest` is the direct-provider id. */
-const EVIDENCE_MODEL_ID = 'typesafe-ai/jev';
+/**
+ * Gateway id of the evaluation model. `jev-latest` is the direct-provider id.
+ *
+ * @public The live measurement (tests/evidence) builds its model from it.
+ */
+export const EVIDENCE_MODEL_ID = 'typesafe-ai/jev';
 
 const DEFAULT_THRESHOLD = 0.5;
+
+/** Off: see the held-out results in tests/evidence/heldout-results.json. */
+const DEFAULT_ENABLED = false;
+
+const ON_VALUES = new Set(['1', 'true', 'on', 'yes', 'enabled']);
+const OFF_VALUES = new Set(['0', 'false', 'off', 'no', 'disabled']);
+
+function parseSwitch(value: string | undefined): boolean {
+  const flag = value?.trim().toLowerCase() ?? '';
+  if (ON_VALUES.has(flag)) return true;
+  if (OFF_VALUES.has(flag)) return false;
+  return DEFAULT_ENABLED;
+}
 
 /** Per-call budget; the spike measured a median of ~0.35 s. */
 const DEFAULT_TIMEOUT_MS = 3_000;
@@ -86,12 +109,11 @@ interface EvidenceCheckConfig {
 
 /** The check's switch and threshold, read from the environment. */
 export function evidenceCheckConfig(env: Readonly<Record<string, string | undefined>> = process.env): EvidenceCheckConfig {
-  const flag = env.EVIDENCE_CHECK?.trim().toLowerCase();
   const raw = env.EVIDENCE_CHECK_THRESHOLD?.trim();
   const parsed = raw ? Number(raw) : Number.NaN;
 
   return {
-    enabled: flag === '1' || flag === 'true',
+    enabled: parseSwitch(env.EVIDENCE_CHECK),
     threshold: Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : DEFAULT_THRESHOLD,
   };
 }

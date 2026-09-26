@@ -87,15 +87,31 @@ afterEach(() => {
 describe('evidenceCheckConfig', () => {
   it('is off with a 0.5 threshold by default', () => {
     expect(evidenceCheckConfig({})).toEqual({ enabled: false, threshold: 0.5 });
+    expect(evidenceCheckConfig({ EVIDENCE_CHECK: '' }).enabled).toBe(false);
+    expect(evidenceCheckConfig({ EVIDENCE_CHECK: '   ' }).enabled).toBe(false);
   });
 
-  it('turns on with 1 or true and reads the threshold', () => {
+  it.each(['1', 'true', 'on', 'yes', 'enabled', ' TRUE ', 'On', 'YES', ' Enabled'])('turns on with %j', (value) => {
+    expect(evidenceCheckConfig({ EVIDENCE_CHECK: value }).enabled).toBe(true);
+  });
+
+  it.each(['0', 'false', 'off', 'no', 'disabled', ' FALSE ', 'Off', 'NO', ' Disabled '])(
+    'turns off with %j',
+    (value) => {
+      expect(evidenceCheckConfig({ EVIDENCE_CHECK: value }).enabled).toBe(false);
+    }
+  );
+
+  it('uses the default for an unrecognised value', () => {
+    expect(evidenceCheckConfig({ EVIDENCE_CHECK: 'maybe' }).enabled).toBe(false);
+    expect(evidenceCheckConfig({ EVIDENCE_CHECK: '2' }).enabled).toBe(false);
+  });
+
+  it('reads the threshold', () => {
     expect(evidenceCheckConfig({ EVIDENCE_CHECK: '1', EVIDENCE_CHECK_THRESHOLD: '0.7' })).toEqual({
       enabled: true,
       threshold: 0.7,
     });
-    expect(evidenceCheckConfig({ EVIDENCE_CHECK: 'true' }).enabled).toBe(true);
-    expect(evidenceCheckConfig({ EVIDENCE_CHECK: '0' }).enabled).toBe(false);
   });
 
   it('falls back to 0.5 for a threshold that is not a probability', () => {

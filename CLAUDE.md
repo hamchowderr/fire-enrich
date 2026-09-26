@@ -153,16 +153,25 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 ### Evidence-support check (off by default)
 
-`EVIDENCE_CHECK=1` turns on a second check in the research step, after `checkFindings`: the
+`EVIDENCE_CHECK=1` (or `true`, `on`, `yes`, `enabled`; `0`, `false`, `off`, `no`, `disabled` mean off) turns on a second check in the research step, after `checkFindings`: the
 `evidence-support` Classifier (`lib/mastra/evidence-support.ts`, model `typesafe-ai/jev` on the
 AI Gateway, registered on the Mastra instance; traced only when observability is configured) asks whether each finding's quote supports its value,
 one call per finding, in parallel. A finding below `EVIDENCE_CHECK_THRESHOLD` (default `0.5`) is
 withdrawn the same way `checkFindings` withdraws one with no read evidence, so it shows as unknown.
 Both are read from `process.env` on every row. The check fails open: an error or a call over 3 s
 keeps the finding and logs one `[EVIDENCE]` warning per group. A cancelled run makes no more calls.
-AIMock cannot serve evaluation models, so tests use a hand-written `Experimental_EvaluationModelV4`
+When on, each finding with a value is one paid gateway call per run, and a failure can add up to
+3 s per group. AIMock cannot serve evaluation models, so `tests/setup.ts` and the Playwright server pin
+`EVIDENCE_CHECK=0`, and tests use a hand-written `Experimental_EvaluationModelV4`
 (`tests/unit/evidence-support.test.ts`) or spy on the registered classifier's model. The AI SDK
 evaluation API is experimental.
+`tests/evidence/evidence-support.live.test.ts` measures the check against the real gateway on a
+labeled set (`tests/evidence/labeled-findings.json`, the default) or on held-out findings from a
+real run (`tests/evidence/heldout-findings.json`, with `EVIDENCE_LIVE_SET=heldout`); it is skipped
+unless `EVIDENCE_LIVE=1`, and costs one call per finding. The held-out results
+(`tests/evidence/heldout-results.json`) are why the check is off by default: it dropped no correct
+value, but it kept the descriptions that added facts their quotes do not give, and a field-type-aware
+rewrite of the question did no better on held-out items than the question in the code.
 
 ## Conventions & Patterns
 

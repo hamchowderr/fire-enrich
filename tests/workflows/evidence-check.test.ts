@@ -1,8 +1,8 @@
 /**
  * The evidence-support check inside `enrichRow`: the research step asks the
  * registered `evidenceSupport` classifier about each finding only when
- * `EVIDENCE_CHECK` is on, and a finding it rejects ends up unknown exactly
- * like one `checkFindings` rejected.
+ * `EVIDENCE_CHECK` turns it on (it is off by default), and a finding it
+ * rejects ends up unknown exactly like one `checkFindings` rejected.
  *
  * The classifier's evaluation model is replaced by a spy, so no call reaches
  * the gateway. Model calls for the research agent are answered by AIMock
@@ -116,8 +116,8 @@ afterAll(() => {
 });
 
 describe('evidence-support check in enrichRow', () => {
-  it('makes no classifier call when EVIDENCE_CHECK is off', async () => {
-    vi.stubEnv('EVIDENCE_CHECK', '');
+  it('makes no classifier call by default', async () => {
+    vi.stubEnv('EVIDENCE_CHECK', undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const doEvaluate = stubClassifier(0.01);
 

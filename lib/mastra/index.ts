@@ -54,7 +54,7 @@ function createMastra() {
     },
     /**
      * Asked by the research step whether a finding's quote supports its value,
-     * when EVIDENCE_CHECK is on. Registered so its evaluations are traced when
+     * when EVIDENCE_CHECK turns the check on. Registered so its evaluations are traced when
      * observability is configured (e.g. in Studio); this app configures none.
      */
     classifiers: {

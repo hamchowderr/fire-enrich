@@ -1,0 +1,261 @@
+{
+  "about": [
+    "Held-out findings for the evidence check (fe-8vj). None of these existed when the question in lib/mastra/evidence-support.ts was rewritten.",
+    "'recorded-2026-09-26': every finding from one local run of the enrichRow workflow on 2026-09-26, with EVIDENCE_CHECK=0 so no finding was removed. Rows: hello@firecrawl.dev, support@supabase.com, hi@mintlify.com, support@langchain.dev, hello@convex.dev, support@hex.tech, hello@vanta.com, support@brex.com. Fields: companyName, companyDescription, industry, businessModel. The run returned 10 findings; the other groups failed their structured output and returned none. All 10 are included, so no selection rule was needed.",
+    "'derived-2026-09-26': variants built from the same fresh quotes (swapped companies, wrong and plausible-but-wrong categories, one alternative correct category), to give the set wrong values.",
+    "Every label was set by the labeling rule in labeled-findings.json before any item was scored. The quote is the finding's evidence joined with a newline, as checkEvidenceSupport sends it."
+  ],
+  "fields": {
+    "companyName": "The name of the company",
+    "companyDescription": "A brief description of what the company does",
+    "industry": "The primary industry the company operates in",
+    "businessModel": "How the company makes money, e.g. subscription software, usage-based API, marketplace, advertising, hardware sales"
+  },
+  "findings": [
+    {
+      "id": "R01",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyName",
+      "value": "Firecrawl",
+      "quote": "About Firecrawl\nThe API to search, scrape, and interact with the web at scale. 🔥 We turn the live internet into clean Markdown and structured data for LLMs, agents, and AI-native software.\nFirecrawl is the web data API to search, scrape, and interact with the web at scale. One API to turn websites into clean, LLM-ready data.",
+      "urls": [
+        "https://www.firecrawl.dev/about",
+        "https://www.firecrawl.dev/"
+      ],
+      "label": "supported"
+    },
+    {
+      "id": "R02",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyDescription",
+      "value": "The web data API to search, scrape, and interact with the web at scale, providing clean web data to power AI agents",
+      "quote": "The API to search, scrape, and interact with the web at scale. 🔥 We turn the live internet into clean Markdown and structured data for LLMs, agents, and AI-native software.\nPower AI agents with   clean web data\nThe web data API to search, scrape, and interact at scale.\nWe provide the infrastructure to make the web fully LLM-ready: structured, searchable, and usable in production.",
+      "urls": [
+        "https://www.firecrawl.dev/about",
+        "https://www.firecrawl.dev/",
+        "https://www.firecrawl.dev/about"
+      ],
+      "label": "supported"
+    },
+    {
+      "id": "R03",
+      "source": "recorded-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "AI Infrastructure Software",
+      "quote": "We provide the infrastructure to make the web fully LLM-ready: structured, searchable, and usable in production. We're building the eyes for AGI.\nFirecrawl is the web data API to search, scrape, and interact with the web at scale. One API to turn websites into clean, LLM-ready data. Ideal for AI companies looking to empower their LLM applications with web context\nAPI to convert entire websites into clean, LLM-ready markdown. It provides a service that crawls all accessible subpages of a website, extracting content without requiring a sitemap, users can obtain clean markdown or structured data suitable for large language model (LLM) applications. The platform is ideal for AI companies seeking to enhance their applications with web data.",
+      "urls": [
+        "https://www.firecrawl.dev/about",
+        "https://www.firecrawl.dev/",
+        "https://tracxn.com/d/companies/firecrawl/__AUIyUTgBhP2fuJfSidYDmsLSkPNv7XqK1ZuBMuVi3yw"
+      ],
+      "label": "supported",
+      "note": "the quotes describe infrastructure that makes the web LLM-ready, for AI companies"
+    },
+    {
+      "id": "R04",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyName",
+      "value": "Supabase",
+      "quote": "Join one of the world's fastest growing open source communities.\nSupabase | The Postgres Development Platform\nSupabase is located in San Francisco, California, United States.",
+      "urls": [
+        "https://supabase.com/company",
+        "https://supabase.com/",
+        "https://www.crunchbase.com/organization/supabase"
+      ],
+      "label": "supported"
+    },
+    {
+      "id": "R05",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyDescription",
+      "value": "Supabase is an open-source Postgres development platform that provides a full Postgres database with built-in authentication, edge functions, storage, realtime capabilities, vector embeddings, and instant REST APIs for building applications.",
+      "quote": "Postgres Database\n\nEvery project is a full Postgres database, the world's most trusted relational database.\n\n- 100% portable\n- Built-in Auth with RLS\n- Easy to extend\nAuthentication\n\nAdd user sign ups and logins,\n\nsecuring your data with Row Level Security.\nEdge Functions\n\nEasily write custom code\n\nwithout deploying or scaling servers.\nSupabase is an open-source BaaS platform built entirely on Postgres that provides a platform for building scalable applications, including authentication, file storage, real-time data synchronization, and integration with machine learning models.",
+      "urls": [
+        "https://supabase.com/",
+        "https://supabase.com/",
+        "https://supabase.com/",
+        "https://research.contrary.com/company/supabase"
+      ],
+      "label": "unsupported",
+      "note": "adds vector embeddings and instant REST APIs, which no quote states (same rule as r08: the value adds facts the quote does not give)"
+    },
+    {
+      "id": "R06",
+      "source": "recorded-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Developer Tools & DevOps",
+      "quote": "Data Infrastructure & Databases\n\nDeveloper Tools & DevOps\nSupabase's suite of backend services, including database management, authentication, file storage, and real-time updates, enables developers to build applications that are intended to be scalable and secure.",
+      "urls": [
+        "https://research.contrary.com/company/supabase",
+        "https://research.contrary.com/company/supabase"
+      ],
+      "label": "supported",
+      "note": "a quote lists \"Developer Tools & DevOps\""
+    },
+    {
+      "id": "R07",
+      "source": "recorded-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Hybrid subscription and usage-based pricing (SaaS with pay-as-you-go consumption)",
+      "quote": "Freeor $0/month and pay as you go... $25per developer/month... $2,500monthly minimum\nFunction calls (per million)Function calls per million | 1M included ($2.20 per additional 1M) | 25M included ($2 per additional 1M)... Action compute (per GB-hour)Action compute per GB-hour | 20 GB-hours included ($0.33 per additional GB-hour) | 250 GB-hours included ($0.30 per additional GB-hour)... Database storage (per GB)Database storage per GB | 0.5 GB included ($0.22 per additional GB) | 50 GB included ($0.20 per additional GB)\nConvex Starter–available right now–is a pure pay-as-you-go, scale-to-zero plan. Starting today, you can register a credit card, and simply pay for any extra resources you need beyond the free plan, and nothing more\nStarter plan is pay-as-you-go beyond free tier limits.",
+      "urls": [
+        "https://www.convex.dev/pricing",
+        "https://www.convex.dev/pricing",
+        "https://news.convex.dev/introducing-the-new-convex-starter-plan-pay-for-only-what-you-need/",
+        "https://www.convex.dev/pricing"
+      ],
+      "label": "supported",
+      "note": "per-developer monthly plans plus pay-as-you-go usage prices"
+    },
+    {
+      "id": "R08",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyName",
+      "value": "Brex",
+      "quote": "Brex: The Modern Finance Software Platform | Spend Smarter\nABOUT US\n\n### We're empowering employees anywhere to make better financial decisions.\n\n## Our mission\n\nWe're here to empower employees anywhere to make better financial decisions.",
+      "urls": [
+        "https://brex.com",
+        "https://www.brex.com/about"
+      ],
+      "label": "supported"
+    },
+    {
+      "id": "R09",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyDescription",
+      "value": "A modern finance software platform offering corporate cards, banking, expense management, bill pay, travel management, and accounting automation in 120+ countries",
+      "quote": "Finance built for speed and control.\n\nModern cards, banking, expenses, accounting, and more — in 120+ countries.\nThe Modern Finance Software Platform | Spend Smarter\nSo we're building a first-of-its-kind solution to integrate the financial services and software they'll need along their way. While they build the future, we'll be building everything they need to launch confidently, scale smarter, and reach their full potential.",
+      "urls": [
+        "https://brex.com",
+        "https://brex.com",
+        "https://www.brex.com/about"
+      ],
+      "label": "unsupported",
+      "note": "adds bill pay and travel management, which no quote states (same rule as r08)"
+    },
+    {
+      "id": "R10",
+      "source": "recorded-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Financial Technology",
+      "quote": "Industry | Fintech\nBrex, a subsidiary of Capital One, is an American fintech company that offers credit cards and cash management accounts as well as a spend management software platform to startup technology companies.\nBrex is a financial technology (fintech) company that offers a suite of financial services designed specifically for startups, e-commerce businesses, and high-growth companies.",
+      "urls": [
+        "https://en.wikipedia.org/wiki/Brex",
+        "https://en.wikipedia.org/wiki/Brex",
+        "https://www.swipesum.com/insights/the-complete-guide-to-brex-a-masterclass-for-high-growth-companies"
+      ],
+      "label": "supported",
+      "note": "a quote reads \"Industry | Fintech\""
+    },
+    {
+      "id": "D01",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Financial Technology",
+      "quote": "We provide the infrastructure to make the web fully LLM-ready: structured, searchable, and usable in production. We're building the eyes for AGI.\nFirecrawl is the web data API to search, scrape, and interact with the web at scale. One API to turn websites into clean, LLM-ready data. Ideal for AI companies looking to empower their LLM applications with web context\nAPI to convert entire websites into clean, LLM-ready markdown. It provides a service that crawls all accessible subpages of a website, extracting content without requiring a sitemap, users can obtain clean markdown or structured data suitable for large language model (LLM) applications. The platform is ideal for AI companies seeking to enhance their applications with web data.",
+      "label": "unsupported",
+      "note": "swapped: Brex's industry on Firecrawl's quotes"
+    },
+    {
+      "id": "D02",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "AI Infrastructure Software",
+      "quote": "Industry | Fintech\nBrex, a subsidiary of Capital One, is an American fintech company that offers credit cards and cash management accounts as well as a spend management software platform to startup technology companies.\nBrex is a financial technology (fintech) company that offers a suite of financial services designed specifically for startups, e-commerce businesses, and high-growth companies.",
+      "label": "unsupported",
+      "note": "swapped: Firecrawl's industry on Brex's quotes"
+    },
+    {
+      "id": "D03",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Cybersecurity",
+      "quote": "Data Infrastructure & Databases\n\nDeveloper Tools & DevOps\nSupabase's suite of backend services, including database management, authentication, file storage, and real-time updates, enables developers to build applications that are intended to be scalable and secure.",
+      "label": "unsupported",
+      "note": "wrong category"
+    },
+    {
+      "id": "D04",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Databases",
+      "quote": "Data Infrastructure & Databases\n\nDeveloper Tools & DevOps\nSupabase's suite of backend services, including database management, authentication, file storage, and real-time updates, enables developers to build applications that are intended to be scalable and secure.",
+      "label": "supported",
+      "note": "alternative correct category: a quote lists \"Data Infrastructure & Databases\""
+    },
+    {
+      "id": "D05",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Advertising-supported",
+      "quote": "Freeor $0/month and pay as you go... $25per developer/month... $2,500monthly minimum\nFunction calls (per million)Function calls per million | 1M included ($2.20 per additional 1M) | 25M included ($2 per additional 1M)... Action compute (per GB-hour)Action compute per GB-hour | 20 GB-hours included ($0.33 per additional GB-hour) | 250 GB-hours included ($0.30 per additional GB-hour)... Database storage (per GB)Database storage per GB | 0.5 GB included ($0.22 per additional GB) | 50 GB included ($0.20 per additional GB)\nConvex Starter–available right now–is a pure pay-as-you-go, scale-to-zero plan. Starting today, you can register a credit card, and simply pay for any extra resources you need beyond the free plan, and nothing more\nStarter plan is pay-as-you-go beyond free tier limits.",
+      "label": "unsupported",
+      "note": "wrong category"
+    },
+    {
+      "id": "D06",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Per-seat subscription only, no usage-based charges",
+      "quote": "Freeor $0/month and pay as you go... $25per developer/month... $2,500monthly minimum\nFunction calls (per million)Function calls per million | 1M included ($2.20 per additional 1M) | 25M included ($2 per additional 1M)... Action compute (per GB-hour)Action compute per GB-hour | 20 GB-hours included ($0.33 per additional GB-hour) | 250 GB-hours included ($0.30 per additional GB-hour)... Database storage (per GB)Database storage per GB | 0.5 GB included ($0.22 per additional GB) | 50 GB included ($0.20 per additional GB)\nConvex Starter–available right now–is a pure pay-as-you-go, scale-to-zero plan. Starting today, you can register a credit card, and simply pay for any extra resources you need beyond the free plan, and nothing more\nStarter plan is pay-as-you-go beyond free tier limits.",
+      "label": "unsupported",
+      "note": "plausible but contradicted by the pay-as-you-go quotes"
+    },
+    {
+      "id": "D07",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Usage-based API pricing",
+      "quote": "The API to search, scrape, and interact with the web at scale. 🔥 We turn the live internet into clean Markdown and structured data for LLMs, agents, and AI-native software.\nPower AI agents with   clean web data\nThe web data API to search, scrape, and interact at scale.\nWe provide the infrastructure to make the web fully LLM-ready: structured, searchable, and usable in production.",
+      "label": "unsupported",
+      "note": "plausible but the quotes say nothing about pricing"
+    },
+    {
+      "id": "D08",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Subscription software",
+      "quote": "Finance built for speed and control.\n\nModern cards, banking, expenses, accounting, and more — in 120+ countries.\nThe Modern Finance Software Platform | Spend Smarter\nSo we're building a first-of-its-kind solution to integrate the financial services and software they'll need along their way. While they build the future, we'll be building everything they need to launch confidently, scale smarter, and reach their full potential.",
+      "label": "unsupported",
+      "note": "plausible but the quotes say what Brex offers, not how it charges"
+    },
+    {
+      "id": "D09",
+      "source": "derived-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyName",
+      "value": "Capital One",
+      "quote": "Brex: The Modern Finance Software Platform | Spend Smarter\nABOUT US\n\n### We're empowering employees anywhere to make better financial decisions.\n\n## Our mission\n\nWe're here to empower employees anywhere to make better financial decisions.",
+      "label": "unsupported",
+      "note": "plausible (Brex's parent) but the name quotes say Brex"
+    },
+    {
+      "id": "D10",
+      "source": "derived-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyDescription",
+      "value": "An open-source web crawler for search engines",
+      "quote": "The API to search, scrape, and interact with the web at scale. 🔥 We turn the live internet into clean Markdown and structured data for LLMs, agents, and AI-native software.\nPower AI agents with   clean web data\nThe web data API to search, scrape, and interact at scale.\nWe provide the infrastructure to make the web fully LLM-ready: structured, searchable, and usable in production.",
+      "label": "unsupported",
+      "note": "plausible but wrong: the quotes describe a web data API for AI agents, not a search-engine crawler"
+    }
+  ]
+}
