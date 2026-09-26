@@ -110,6 +110,43 @@ describe('libsqlPlan', () => {
       expect(plan.reason).toBe('TURSO_DATABASE_URL is not set');
     }
   });
+
+  it('migrates a production build whose Turso pair carries a Marketplace prefix', () => {
+    const env = { VERCEL_ENV: 'production', FIRE_TURSO_DATABASE_URL: 'libsql://db.example', FIRE_TURSO_AUTH_TOKEN: 'tok' };
+
+    expect(libsqlPlan(env)).toEqual({ migrate: true, reason: 'production build' });
+  });
+
+  it('fails on a mixed or half pair, naming the variables set and missing and no value', () => {
+    const mixed = libsqlPlan({ VERCEL_ENV: 'production', FIRE_TURSO_DATABASE_URL: 'libsql://db.example', TURSO_AUTH_TOKEN: 'tok' });
+
+    expect(mixed).toEqual({
+      migrate: false,
+      fail: true,
+      reason:
+        'Turso is misconfigured: FIRE_TURSO_DATABASE_URL, TURSO_AUTH_TOKEN are set but FIRE_TURSO_AUTH_TOKEN, ' +
+        'TURSO_DATABASE_URL are missing. Set TURSO_DATABASE_URL (and TURSO_AUTH_TOKEN), or both halves of one <PREFIX>_TURSO_* pair.',
+    });
+
+    const half = libsqlPlan({ VERCEL_ENV: 'preview', FIRE_TURSO_DATABASE_URL: 'libsql://db.example' });
+    expect(half.fail).toBe(true);
+    expect(half.reason).toContain('FIRE_TURSO_DATABASE_URL is set but FIRE_TURSO_AUTH_TOKEN is missing');
+    expect(half.reason).not.toContain('db.example');
+  });
+
+  it('fails on two prefixed pairs and no plain url', () => {
+    const plan = libsqlPlan({
+      VERCEL_ENV: 'production',
+      A_TURSO_DATABASE_URL: 'libsql://a.example',
+      A_TURSO_AUTH_TOKEN: 'tok-a',
+      B_TURSO_DATABASE_URL: 'libsql://b.example',
+      B_TURSO_AUTH_TOKEN: 'tok-b',
+    });
+
+    expect(plan.migrate).toBe(false);
+    expect(plan.fail).toBe(true);
+    expect(plan.reason).toContain('A_TURSO_DATABASE_URL, B_TURSO_DATABASE_URL');
+  });
 });
 
 /**
@@ -175,6 +212,44 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
     const second = build(turso);
     expect(second.status).toBe(0);
     expect(second.stdout).toContain('nothing changed.');
+  });
+
+  it('applies the libSQL schema to the pair the Marketplace integration sets under a custom prefix', () => {
+    const result = build({
+      VERCEL_ENV: 'production',
+      FIRE_TURSO_DATABASE_URL: `file:${join(dir, 'prefixed.db')}`,
+      FIRE_TURSO_AUTH_TOKEN: 'stub-token',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('db:migrate:libsql: production build.');
+    expect(result.stdout).toContain('prefixed.db: ');
+    expect(result.stdout).toContain('table:profiles');
+  });
+
+  it('fails before building on half a prefixed Turso pair, naming the variables and no value', () => {
+    const result = build({ VERCEL_ENV: 'production', FIRE_TURSO_DATABASE_URL: `file:${join(dir, 'half.db')}` });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain(BUILT);
+    expect(result.stderr).toContain(
+      'db:migrate:libsql: Turso is misconfigured: FIRE_TURSO_DATABASE_URL is set but FIRE_TURSO_AUTH_TOKEN is missing.'
+    );
+    expect(result.stderr).not.toContain('half.db');
+  });
+
+  it('fails before building when two prefixed Turso pairs are set and no plain one', () => {
+    const result = build({
+      VERCEL_ENV: 'production',
+      A_TURSO_DATABASE_URL: `file:${join(dir, 'a.db')}`,
+      A_TURSO_AUTH_TOKEN: 'stub-a',
+      B_TURSO_DATABASE_URL: `file:${join(dir, 'b.db')}`,
+      B_TURSO_AUTH_TOKEN: 'stub-b',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain(BUILT);
+    expect(result.stderr).toContain('db:migrate:libsql: Turso is ambiguous: A_TURSO_DATABASE_URL, B_TURSO_DATABASE_URL');
   });
 
   it('skips the libSQL migration on a preview build without LIBSQL_PREVIEW_MIGRATE', () => {
