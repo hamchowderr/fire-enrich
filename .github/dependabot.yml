@@ -35,6 +35,11 @@ updates:
       npm-minor-patch:
         patterns:
           - "*"
+        # @vercel/oidc is pinned to the exact version @ai-sdk/gateway pins.
+        # Its updates get their own PR, so closing one does not drop the
+        # rest of the week's updates.
+        exclude-patterns:
+          - "@vercel/oidc"
         update-types:
           - "minor"
           - "patch"
