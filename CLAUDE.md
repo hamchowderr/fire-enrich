@@ -164,12 +164,14 @@ When on, each finding with a value is one paid gateway call per run, and a failu
 3 s per group. AIMock cannot serve evaluation models, so `tests/setup.ts` and the Playwright server pin
 `EVIDENCE_CHECK=0`, and tests use a hand-written `Experimental_EvaluationModelV4`
 (`tests/unit/evidence-support.test.ts`) or spy on the registered classifier's model. The AI SDK
-evaluation API is experimental. The question tells factual fields (the quote must state the value)
-from classification fields (the category must be the plain reading of the quote).
-`tests/evidence/evidence-support.live.test.ts` measures the check on a labeled set
-(`tests/evidence/labeled-findings.json`) against the real gateway; it is skipped unless
-`EVIDENCE_LIVE=1`, and costs one call per finding. The question was tuned on that set, so turning
-the check on by default waits for a check on held-out findings (items marked `heldOut` in the set).
+evaluation API is experimental.
+`tests/evidence/evidence-support.live.test.ts` measures the check against the real gateway on a
+labeled set (`tests/evidence/labeled-findings.json`, the default) or on held-out findings from a
+real run (`tests/evidence/heldout-findings.json`, with `EVIDENCE_LIVE_SET=heldout`); it is skipped
+unless `EVIDENCE_LIVE=1`, and costs one call per finding. The held-out results
+(`tests/evidence/heldout-results.json`) are why the check is off by default: it dropped no correct
+value, but it kept the descriptions that added facts their quotes do not give, and a field-type-aware
+rewrite of the question did no better on held-out items than the question in the code.
 
 ## Conventions & Patterns
 

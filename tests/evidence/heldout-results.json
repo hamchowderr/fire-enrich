@@ -1,0 +1,699 @@
+{
+  "about": [
+    "Held-out check of the evidence check (fe-8vj), 2026-09-26. Items: tests/evidence/heldout-findings.json (10 recorded, 10 derived) and h01-h03 from labeled-findings.json. Labels were set before scoring.",
+    "'original' is the question on main (and in the code); 'rewritten' is the field-type-aware question the PR tried and reverted. Both scored the same state, shaped as checkEvidenceSupport sends it."
+  ],
+  "enrichment": {
+    "runs": 1,
+    "rows": 8,
+    "wallSeconds": 92,
+    "researchGroups": 16,
+    "groupsWithStructuredOutputFailure": 12,
+    "findingsReturned": 10,
+    "pageReadEvents": 64,
+    "evidenceCheckCallsDuringEnrichment": 0,
+    "gatewayCredits": "The gateway credit balance read the same before and after the run, so it did not show the run cost yet."
+  },
+  "jevCalls": 46,
+  "jevCallCap": 60,
+  "scores": [
+    {
+      "id": "R01",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyName",
+      "value": "Firecrawl",
+      "label": "supported",
+      "original": 0.97,
+      "rewritten": 0.97
+    },
+    {
+      "id": "R02",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyDescription",
+      "value": "The web data API to search, scrape, and interact with the web at scale, providing clean web data to power AI agents",
+      "label": "supported",
+      "original": 0.95,
+      "rewritten": 0.94
+    },
+    {
+      "id": "R03",
+      "source": "recorded-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "AI Infrastructure Software",
+      "label": "supported",
+      "original": 0.75,
+      "rewritten": 0.85
+    },
+    {
+      "id": "R04",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyName",
+      "value": "Supabase",
+      "label": "supported",
+      "original": 0.93,
+      "rewritten": 0.95
+    },
+    {
+      "id": "R05",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyDescription",
+      "value": "Supabase is an open-source Postgres development platform that provides a full Postgres database with built-in authentication, edge functions, storage, realtime capabilities, vector embeddings, and instant REST APIs for building applications.",
+      "label": "unsupported",
+      "original": 0.86,
+      "rewritten": 0.8
+    },
+    {
+      "id": "R06",
+      "source": "recorded-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Developer Tools & DevOps",
+      "label": "supported",
+      "original": 0.91,
+      "rewritten": 0.87
+    },
+    {
+      "id": "R07",
+      "source": "recorded-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Hybrid subscription and usage-based pricing (SaaS with pay-as-you-go consumption)",
+      "label": "supported",
+      "original": 0.72,
+      "rewritten": 0.76
+    },
+    {
+      "id": "R08",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyName",
+      "value": "Brex",
+      "label": "supported",
+      "original": 0.93,
+      "rewritten": 0.93
+    },
+    {
+      "id": "R09",
+      "source": "recorded-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyDescription",
+      "value": "A modern finance software platform offering corporate cards, banking, expense management, bill pay, travel management, and accounting automation in 120+ countries",
+      "label": "unsupported",
+      "original": 0.88,
+      "rewritten": 0.87
+    },
+    {
+      "id": "R10",
+      "source": "recorded-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Financial Technology",
+      "label": "supported",
+      "original": 0.98,
+      "rewritten": 0.98
+    },
+    {
+      "id": "D01",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Financial Technology",
+      "label": "unsupported",
+      "original": 0.04,
+      "rewritten": 0.14
+    },
+    {
+      "id": "D02",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "AI Infrastructure Software",
+      "label": "unsupported",
+      "original": 0.03,
+      "rewritten": 0.02
+    },
+    {
+      "id": "D03",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Cybersecurity",
+      "label": "unsupported",
+      "original": 0.07,
+      "rewritten": 0.12
+    },
+    {
+      "id": "D04",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "industry",
+      "value": "Databases",
+      "label": "supported",
+      "original": 0.84,
+      "rewritten": 0.87
+    },
+    {
+      "id": "D05",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Advertising-supported",
+      "label": "unsupported",
+      "original": 0.04,
+      "rewritten": 0.04
+    },
+    {
+      "id": "D06",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Per-seat subscription only, no usage-based charges",
+      "label": "unsupported",
+      "original": 0.05,
+      "rewritten": 0.04
+    },
+    {
+      "id": "D07",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Usage-based API pricing",
+      "label": "unsupported",
+      "original": 0.14,
+      "rewritten": 0.45
+    },
+    {
+      "id": "D08",
+      "source": "derived-2026-09-26",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Subscription software",
+      "label": "unsupported",
+      "original": 0.36,
+      "rewritten": 0.61
+    },
+    {
+      "id": "D09",
+      "source": "derived-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyName",
+      "value": "Capital One",
+      "label": "unsupported",
+      "original": 0.02,
+      "rewritten": 0.02
+    },
+    {
+      "id": "D10",
+      "source": "derived-2026-09-26",
+      "fieldType": "quoted",
+      "field": "companyDescription",
+      "value": "An open-source web crawler for search engines",
+      "label": "unsupported",
+      "original": 0.24,
+      "rewritten": 0.32
+    },
+    {
+      "id": "h01",
+      "source": "recorded",
+      "fieldType": "classification",
+      "field": "companyType",
+      "value": "Startup",
+      "label": "unsupported",
+      "original": 0.71,
+      "rewritten": 0.75
+    },
+    {
+      "id": "h02",
+      "source": "recorded",
+      "fieldType": "classification",
+      "field": "businessModel",
+      "value": "Usage-based API",
+      "label": "unsupported",
+      "original": 0.06,
+      "rewritten": 0.09
+    },
+    {
+      "id": "h03",
+      "source": "recorded",
+      "fieldType": "classification",
+      "field": "target_customer",
+      "value": "Enterprises",
+      "label": "unsupported",
+      "original": 0.3,
+      "rewritten": 0.32
+    }
+  ],
+  "errorsByThreshold": {
+    "original": {
+      "0.3": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": [
+            "D08"
+          ]
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01",
+            "h03"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "D08",
+            "h01",
+            "h03"
+          ]
+        }
+      },
+      "0.4": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": []
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "h01"
+          ]
+        }
+      },
+      "0.5": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": []
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "h01"
+          ]
+        }
+      },
+      "0.6": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": []
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "h01"
+          ]
+        }
+      },
+      "0.7": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": []
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "h01"
+          ]
+        }
+      },
+      "0.8": {
+        "recorded": {
+          "correctDropped": [
+            "R03",
+            "R07"
+          ],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [
+            "R03",
+            "R07"
+          ],
+          "wrongKept": []
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": []
+        },
+        "all": {
+          "correctDropped": [
+            "R03",
+            "R07"
+          ],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        }
+      }
+    },
+    "rewritten": {
+      "0.3": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "D10"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": [
+            "D07",
+            "D08"
+          ]
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01",
+            "h03"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "D07",
+            "D08",
+            "D10",
+            "h01",
+            "h03"
+          ]
+        }
+      },
+      "0.4": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": [
+            "D07",
+            "D08"
+          ]
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "D07",
+            "D08",
+            "h01"
+          ]
+        }
+      },
+      "0.5": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": [
+            "D08"
+          ]
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "D08",
+            "h01"
+          ]
+        }
+      },
+      "0.6": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": [
+            "D08"
+          ]
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "D08",
+            "h01"
+          ]
+        }
+      },
+      "0.7": {
+        "recorded": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [],
+          "wrongKept": []
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": [
+            "h01"
+          ]
+        },
+        "all": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09",
+            "h01"
+          ]
+        }
+      },
+      "0.8": {
+        "recorded": {
+          "correctDropped": [
+            "R07"
+          ],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "quoted": {
+          "correctDropped": [],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        },
+        "classification": {
+          "correctDropped": [
+            "R07"
+          ],
+          "wrongKept": []
+        },
+        "h01to03": {
+          "correctDropped": [],
+          "wrongKept": []
+        },
+        "all": {
+          "correctDropped": [
+            "R07"
+          ],
+          "wrongKept": [
+            "R05",
+            "R09"
+          ]
+        }
+      }
+    }
+  }
+}

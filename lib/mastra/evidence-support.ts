@@ -20,8 +20,8 @@
  * - `EVIDENCE_CHECK`: off by default. `1`, `true`, `on`, `yes` or `enabled`
  *   turns the check on; `0`, `false`, `off`, `no` or `disabled` turns it off
  *   (trimmed, any case). An empty or unrecognised value uses the default.
- *   Turning it on by default waits for a check of the question on held-out
- *   findings (tests/evidence).
+ *   On held-out findings it dropped no correct value but also kept the wrong
+ *   values that real runs produced (tests/evidence), so it stays off.
  * - Cost: when on, each finding with a value is one paid gateway call per
  *   run, and a failing or slow call can add up to the 3 s timeout per group.
  * - `EVIDENCE_CHECK_THRESHOLD`: the probability a finding needs to be kept,
@@ -49,7 +49,7 @@ export const EVIDENCE_MODEL_ID = 'typesafe-ai/jev';
 
 const DEFAULT_THRESHOLD = 0.5;
 
-/** Off until the question is checked on held-out findings (tests/evidence). */
+/** Off: see the held-out results in tests/evidence/heldout-results.json. */
 const DEFAULT_ENABLED = false;
 
 const ON_VALUES = new Set(['1', 'true', 'on', 'yes', 'enabled']);
@@ -72,13 +72,10 @@ const QUESTIONS = {
   supported: {
     type: 'boolean',
     instructions:
-      'The state holds a data field (its name and description), a value reported for it, and a quote from a web page given as evidence. Does the quote, on its own, support that value for that field? ' +
-      'Fields are of two kinds. A factual field (a name, description, number, date, place, amount, URL or job title) is supported only when the quote states the value; rewording and rounding are fine, but a figure for a different quantity is not (one funding round is not total funding, forks are not stars, a copyright year is not a founding year). ' +
-      'A classification field (an industry, company type, business model, customer type or pricing model) asks for a category: it is supported when the category is the plain, reasonable reading of the quote, even if the quote does not name the category.',
+      'The state holds a data field (its name and description), a value reported for it, and a quote from a web page given as evidence. Does the quote, on its own, support that value for that field?',
     criteria: {
-      true: 'The quote states the value, or, for a classification field, a reasonable reader would assign that category from the quote alone.',
-      false:
-        'The quote states a different value, gives a figure for a different quantity, needs facts it does not contain to reach the value, or is about something else.',
+      true: 'The quote states or directly implies the value for this field.',
+      false: 'The quote does not state the value, states a different value, or is about something else.',
     },
   },
 } as const;

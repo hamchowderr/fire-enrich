@@ -29,6 +29,8 @@
  *   any call.
  * - `EVIDENCE_LIVE_OUT`: path of a JSON file to write the scores to.
  * - `EVIDENCE_CHECK_THRESHOLD`: the threshold the keep/drop column uses.
+ * - `EVIDENCE_LIVE_SET`: `labeled` (default, `labeled-findings.json`) or
+ *   `heldout` (`heldout-findings.json`, findings from a real run).
  *
  * Cost: well under a thousand input tokens per call; typesafe-ai/jev lists
  * input at $0.042 per million tokens, so a full pass of the set costs well
@@ -52,7 +54,7 @@ type EvaluationModel = Parameters<typeof createEvidenceSupportClassifier>[0];
 
 interface LabeledFinding {
   id: string;
-  source: 'recorded' | 'authored';
+  source: string;
   fieldType: 'quoted' | 'classification';
   field: string;
   value: FindingType['value'];
@@ -64,7 +66,6 @@ interface LabeledFinding {
 }
 
 interface LabeledSet {
-  labelingRule: string[];
   fields: Record<string, string>;
   findings: LabeledFinding[];
 }
@@ -74,7 +75,10 @@ interface Scored extends LabeledFinding {
   kept: boolean;
 }
 
-const SET_PATH = fileURLToPath(new URL('./labeled-findings.json', import.meta.url));
+const SETS = {
+  labeled: fileURLToPath(new URL('./labeled-findings.json', import.meta.url)),
+  heldout: fileURLToPath(new URL('./heldout-findings.json', import.meta.url)),
+} as const;
 const BATCH = 8;
 const TIMEOUT_MS = 15_000;
 const SWEEP = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
@@ -139,7 +143,9 @@ function spread(values: number[]): string {
 
 describe.skipIf(!live)('evidence check on the labeled set (live gateway)', () => {
   it('scores every finding and reports the errors per field type', { timeout: 300_000 }, async () => {
-    const set = JSON.parse(readFileSync(SET_PATH, 'utf8')) as LabeledSet;
+    const setName = (process.env.EVIDENCE_LIVE_SET ?? 'labeled') as keyof typeof SETS;
+    expect(Object.keys(SETS), 'EVIDENCE_LIVE_SET must be labeled or heldout').toContain(setName);
+    const set = JSON.parse(readFileSync(SETS[setName], 'utf8')) as LabeledSet;
     const apiKey = process.env.EVIDENCE_LIVE_GATEWAY_KEY;
     expect(apiKey, 'EVIDENCE_LIVE=1 needs AI_GATEWAY_API_KEY in the environment').toBeTruthy();
 
