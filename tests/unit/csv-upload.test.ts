@@ -54,6 +54,29 @@ describe('readCsvParseResult', () => {
     });
   });
 
+  it('rejects a colon-delimited file, whose cells hold more than an address', () => {
+    const { results, parsed } = parse('name:email\nFirecrawl:hello@firecrawl.dev\n');
+
+    // PapaParse does not try `:`, so the whole line lands in one column.
+    expect(results.meta.fields).toEqual(['name:email']);
+    expect(parsed).toEqual({
+      error: "CSV parsing error: Unable to auto-detect delimiting character; defaulted to ','",
+    });
+  });
+
+  it('rejects a space-delimited file', () => {
+    const { results, parsed } = parse('name email\nFirecrawl hello@firecrawl.dev\n');
+
+    expect(results.meta.fields).toEqual(['name email']);
+    expect(parsed).toEqual({
+      error: "CSV parsing error: Unable to auto-detect delimiting character; defaulted to ','",
+    });
+  });
+
+  it('reports a one-column header with no rows as empty', () => {
+    expect(parse('email\n').parsed).toEqual({ error: 'CSV file is empty' });
+  });
+
   it('rejects a CSV with an unclosed quote', () => {
     const { results, parsed } = parse('name,email\n"Firecrawl,hello@firecrawl.dev\n');
 
@@ -92,6 +115,6 @@ describe('readCsvParseResult', () => {
   });
 
   it('rejects an empty file', () => {
-    expect(parse('').parsed).toHaveProperty('error');
+    expect(parse('').parsed).toEqual({ error: 'CSV file is empty' });
   });
 });
