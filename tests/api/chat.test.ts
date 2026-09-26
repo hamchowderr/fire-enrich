@@ -31,6 +31,7 @@ vi.mock('firecrawl', () => ({
 import { DELETE, POST } from '@/app/api/chat/route';
 
 import { AIMOCK_URL } from '../aimock';
+import { watchTraceFlush } from '../trace-flush';
 
 /** The table as the panel formats it. */
 const CONTEXT = {
@@ -113,6 +114,13 @@ describe('POST /api/chat', () => {
     ]);
     expect(searchMock).not.toHaveBeenCalled();
     expect(scrapeMock).not.toHaveBeenCalled();
+  });
+
+  it('writes the agent trace spans in after(), once the stream has ended', { timeout: 30_000 }, async () => {
+    const runAfterTasks = watchTraceFlush();
+    const events = await readEvents(await post('What does Firecrawl do according to the table?'));
+    expect(events.at(-1)).toEqual({ type: 'complete' });
+    await runAfterTasks();
   });
 
   it('searches the web and, without a scrape, cites no search hit', { timeout: 30_000 }, async () => {

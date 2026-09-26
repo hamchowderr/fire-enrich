@@ -14,6 +14,7 @@ import { FieldGenerationResponse } from '@/lib/types/field-generation';
 
 import plannerFixtures from '../../fixtures/planner-plan.json';
 import { AIMOCK_URL } from '../aimock';
+import { watchTraceFlush } from '../trace-flush';
 
 /**
  * `POST /api/generate-fields` through the planner agent and AIMock.
@@ -233,6 +234,12 @@ describe(`POST ${ROUTE}`, () => {
       expect(system).toContain('Audience: Support leads');
     }
   );
+
+  it('writes the planner trace spans in after()', { timeout: 30_000 }, async () => {
+    const runAfterTasks = watchTraceFlush();
+    await request(server).post(ROUTE).send({ prompt: GOAL }).expect(200);
+    await runAfterTasks();
+  });
 
   it('caches the plan under its field names', { timeout: 30_000 }, async () => {
     const response = await request(server)

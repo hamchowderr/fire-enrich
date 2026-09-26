@@ -169,19 +169,46 @@ evaluation API is experimental.
 `lib/mastra/tracing.ts` gives the Mastra instance an `Observability` (`@mastra/observability`,
 service name `fire-enrich`) with one `MastraStorageExporter`, which writes spans to the
 instance's own libSQL store, table `mastra_ai_spans`. LibSQLStore creates that table at init
-whether or not tracing is on, so tracing adds no migration. `TRACING=0` turns it off;
-`TRACING_SAMPLE_RATE` (default `1`) samples whole traces. Per-chunk model spans
-(`MODEL_CHUNK`) are excluded to limit storage; they are leaves, so no span loses its parent. `checkEvidenceSupport` records one
-`evidence-support: <field>` child span of the research step per finding it checks, with
-`field`, `probability`, `threshold` and `decision` (`kept`, `dropped`, `failed`, `cancelled`)
-in its metadata and the value and quote cut to 500 characters; the classifier's
-`CLASSIFIER_EVALUATION` span, which records no answers, nests under it. The exporter
-batches writes, so `/api/enrich`, `/api/chat` and `/api/generate-fields` call
-`flushTracesAfter` (`lib/flush-traces.ts`), which flushes inside `after()` once the
-response has ended. It lives outside `lib/mastra` so Studio's bundle does not import
-Next.js. `tests/setup.ts` sets `TRACING=0`; `tests/unit/evidence-support.test.ts` checks
-the spans with its own `Observability` and an in-memory exporter. Traces are viewed in
-Studio (`npm run studio`) pointed at the same `TURSO_*` database.
+whether or not tracing is on, so tracing adds no migration. `TRACING` (`0`, `false`, `off`,
+`no`, `disabled` mean off) turns it off; `TRACING_SAMPLE_RATE` (default `1`) samples whole
+traces. Per-chunk model spans (`MODEL_CHUNK`) are excluded to limit storage; they are leaves,
+so no span loses its parent.
+
+Spans store prompts, tool results and the workflow's input and output, so two span output
+processors (`lib/mastra/span-processors.ts`) run before storage: `emailRedactor` masks every
+email address to `***@domain` in input, output, metadata, attributes, error info and request
+context (strings and object keys), and `pageTextLimiter` cuts strings under a `markdown` key
+(Firecrawl page text) to 2,000 characters. `serializationOptions.maxStringLength` caps any
+other string at 16,000. Mastra's default `SensitiveDataFilter` also runs. Both processors are
+idempotent, because Mastra runs processors on every export of a span (start, update, end).
+Other personal data in a row is stored as is, and Mastra's workflow snapshots
+(`mastra_workflow_snapshot`) hold each row's input, email included, unmasked and unpruned (follow-up bead fe-w8a).
+
+Retention: `TRACING_RETENTION_DAYS` (default 14, `0` = forever) sets the LibSQLStore's
+`retention.observability.spans.maxAge`. `pruneTraces` (`lib/flush-traces.ts`) calls
+`storage.prune({ maxRows: 5000 })` at most once an hour per instance, after the flush in
+`after()`. That path was chosen over a Vercel cron route because it needs no `CRON_SECRET`
+or scheduler, so a one-click deploy prunes too; overlapping prunes are harmless.
+
+`checkEvidenceSupport` records one `evidence-support: <field>` child span of the research
+step per finding it checks, with `field`, `probability`, `threshold` and `decision` (`kept`,
+`dropped`, `failed`, `cancelled`) in its metadata and the value and quote cut to 500
+characters; the classifier's `CLASSIFIER_EVALUATION` span, which records no answers, nests
+under it. The exporter batches writes, so `/api/enrich`, `/api/chat` and
+`/api/generate-fields` call `flushTracesAfter`, which flushes and then prunes inside
+`after()` once the response has ended. It lives outside `lib/mastra` so Studio's bundle does
+not import Next.js.
+
+Tests: `tests/setup.ts` sets `TRACING=0`. `tests/unit/span-processors.test.ts` and
+`tests/unit/evidence-support.test.ts` check spans with their own `Observability` and an
+in-memory exporter; `tests/unit/tracing.test.ts` prunes a real libSQL file;
+`tests/unit/flush-traces.test.ts` covers the flush and prune; the route tests check that
+each route registers the flush (`tests/trace-flush.ts`).
+
+Viewing: local, `npm run studio`. Production: a separate env file (e.g.
+`.env.traces.local`) with the production `TURSO_*` values and `TRACING=0`, then
+`npx mastra dev --dir lib/mastra --env .env.traces.local` (with `--env` Studio reads only
+that file). Never put production values in `.env.local`.
 
 ## Conventions & Patterns
 
