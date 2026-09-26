@@ -451,7 +451,8 @@ export default function HomePage() {
                     Model calls go through the Vercel AI Gateway, which is
                     configured on the server, not in this dialog. Set
                     AI_GATEWAY_API_KEY for local development. A Vercel
-                    deployment authenticates with its OIDC token.
+                    deployment authenticates with its OIDC token when OIDC is
+                    enabled, or with AI_GATEWAY_API_KEY.
                   </p>
                 </div>
                 <Button
@@ -477,20 +478,20 @@ export default function HomePage() {
               Cancel
             </Button>
             {missingKeys.firecrawl && (
-            <Button
-              onClick={handleApiKeySubmit}
-              disabled={isValidatingApiKey || !firecrawlApiKey.trim()}
-              variant="primary"
-            >
-              {isValidatingApiKey ? (
-                <>
-                  <Loader2 style={{ width: '20px', height: '20px', minWidth: '20px', minHeight: '20px' }} className="mr-2 animate-spin" />
-                  Validating...
-                </>
-              ) : (
-                "Submit"
-              )}
-            </Button>
+              <Button
+                onClick={handleApiKeySubmit}
+                disabled={isValidatingApiKey || !firecrawlApiKey.trim()}
+                variant="primary"
+              >
+                {isValidatingApiKey ? (
+                  <>
+                    <Loader2 style={{ width: '20px', height: '20px', minWidth: '20px', minHeight: '20px' }} className="mr-2 animate-spin" />
+                    Validating...
+                  </>
+                ) : (
+                  "Submit"
+                )}
+              </Button>
             )}
           </DialogFooter>
         </DialogContent>

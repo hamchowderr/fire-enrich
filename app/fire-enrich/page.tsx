@@ -356,7 +356,8 @@ export default function CSVEnrichmentPage() {
                     Model calls go through the Vercel AI Gateway, which is
                     configured on the server, not in this dialog. Set
                     AI_GATEWAY_API_KEY for local development. A Vercel
-                    deployment authenticates with its OIDC token.
+                    deployment authenticates with its OIDC token when OIDC is
+                    enabled, or with AI_GATEWAY_API_KEY.
                   </p>
                 </div>
                 <Button
@@ -382,20 +383,20 @@ export default function CSVEnrichmentPage() {
               Cancel
             </Button>
             {missingKeys.firecrawl && (
-            <Button
-              onClick={handleApiKeySubmit}
-              disabled={isValidatingApiKey || !firecrawlApiKey.trim()}
-              variant="code"
-            >
-              {isValidatingApiKey ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Validating...
-                </>
-              ) : (
-                "Submit"
-              )}
-            </Button>
+              <Button
+                onClick={handleApiKeySubmit}
+                disabled={isValidatingApiKey || !firecrawlApiKey.trim()}
+                variant="code"
+              >
+                {isValidatingApiKey ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Validating...
+                  </>
+                ) : (
+                  "Submit"
+                )}
+              </Button>
             )}
           </DialogFooter>
         </DialogContent>

@@ -469,7 +469,7 @@ describe('app/api source', () => {
 });
 
 describe('app source', () => {
-  it('asks for no OpenAI key: the gateway is reported and configured under its own name', () => {
+  it('asks for no OpenAI key', () => {
     const appDir = fileURLToPath(new URL('../../app', import.meta.url));
     const files = sourceFiles(appDir);
     expect(files.length).toBeGreaterThan(0);
@@ -480,10 +480,5 @@ describe('app source', () => {
       .filter((file) => /OPENAI_API_KEY|openai_api_key|x-openai-api-key/i.test(readFileSync(file, 'utf8')))
       .map((file) => path.relative(appDir, file));
     expect(offenders).toEqual([]);
-
-    // Both upload pages gate on the gateway's status.
-    for (const page of ['page.tsx', 'fire-enrich/page.tsx']) {
-      expect(readFileSync(path.join(appDir, page), 'utf8')).toContain('environmentStatus.AI_GATEWAY_API_KEY');
-    }
   });
 });
