@@ -4,17 +4,16 @@
  * Pins the environment so a test can never reach a real model, Firecrawl, or
  * Turso: the model path is forced onto AIMock, the provider keys are stubs
  * that would be rejected by the real services, and Mastra's storage is a
- * throwaway SQLite file in the OS temp directory (one per worker process, so
- * parallel workers never contend for the same write lock).
+ * throwaway SQLite file in the run's temporary directory (one per worker
+ * process, so parallel workers never contend for the same write lock;
+ * `tests/global-setup.ts` removes the directory when the run ends).
  *
  * `AIMOCK_URL` is left alone when already set, so CI can point at its own
  * mock server; everything else is overwritten on purpose.
  */
-import { mkdirSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
-import { vi } from 'vitest';
+import { inject, vi } from 'vitest';
 
 // Tests call route handlers directly, outside a Next.js request scope, where
 // `after` throws. Record the tasks instead, so a test can inspect them.
@@ -33,7 +32,5 @@ process.env.MASTRA_TELEMETRY_DISABLED = '1';
 // on set it themselves (tests/workflows/evidence-check.test.ts).
 process.env.EVIDENCE_CHECK = '0';
 
-const storageDir = path.join(os.tmpdir(), 'fire-enrich-tests');
-mkdirSync(storageDir, { recursive: true });
-process.env.TURSO_DATABASE_URL = `file:${path.join(storageDir, `test-${process.pid}.db`)}`;
+process.env.TURSO_DATABASE_URL = `file:${path.join(inject('tempDir'), `store-${process.pid}.db`)}`;
 delete process.env.TURSO_AUTH_TOKEN;

@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { createClient } from '@libsql/client';
+import { inject } from 'vitest';
 
 import { resetAppDb } from '@/lib/app-db';
 
@@ -10,7 +10,8 @@ import { resetAppDb } from '@/lib/app-db';
  * A fresh libSQL file per test for the app's tables (profiles, saved plans).
  *
  * `useTempAppDb()` points `TURSO_DATABASE_URL` at a new file in a directory of
- * its own and forgets which databases have their schema, so the next call
+ * its own, inside the run's temporary directory (`tests/global-setup.ts`),
+ * and forgets which databases have their schema, so the next call
  * applies the schema to that file, as it does for any database off Vercel. The returned cleanup
  * closes the client, restores the variable and tries to remove the directory.
  *
@@ -18,7 +19,7 @@ import { resetAppDb } from '@/lib/app-db';
  */
 export function useTempAppDb(): { url: string; cleanup: () => void } {
   const previous = process.env.TURSO_DATABASE_URL;
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'fire-enrich-appdb-'));
+  const dir = mkdtempSync(path.join(inject('tempDir'), 'appdb-'));
   const url = `file:${path.join(dir, 'app.db')}`;
 
   resetAppDb();
@@ -29,9 +30,8 @@ export function useTempAppDb(): { url: string; cleanup: () => void } {
     cleanup() {
       resetAppDb();
       process.env.TURSO_DATABASE_URL = previous;
-      // Best effort: on Windows the native driver can hold the file a little
-      // past close(). Left behind, it sits in the OS temp directory, as the
-      // Mastra store file from tests/setup.ts does.
+      // Best effort: on Windows the native driver holds the file until the
+      // client is garbage collected. The global teardown removes what is left.
       try {
         rmSync(dir, { recursive: true, force: true });
       } catch {

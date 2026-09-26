@@ -67,7 +67,7 @@ import { mastra } from '@/lib/mastra';
 import { putPlan } from '@/lib/mastra/plan-cache';
 import type { ResearchPlanType } from '@/lib/mastra/schemas';
 
-const AIMOCK_URL = process.env.AIMOCK_URL as string;
+import { AIMOCK_URL } from '../aimock';
 
 const plannedField = (name: string, displayName: string, strategy: 'search' | 'agent' | 'browser') => ({
   name,

@@ -34,7 +34,7 @@ vi.mock('firecrawl', () => ({
 import { mastra } from '@/lib/mastra';
 import { EnrichRowOutput, type EnrichRowInputType, type ResearchPlanType } from '@/lib/mastra/schemas';
 
-const AIMOCK_URL = process.env.AIMOCK_URL as string;
+import { AIMOCK_URL } from '../aimock';
 
 const PLAN: ResearchPlanType = {
   fields: [

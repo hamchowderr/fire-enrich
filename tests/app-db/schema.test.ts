@@ -1,11 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createClient } from '@libsql/client';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, inject, it } from 'vitest';
 
 import { APP_DB_STATEMENTS, applyAppDbSchema } from '@/lib/app-db-schema.mjs';
 
@@ -18,7 +17,7 @@ const SCRIPT = fileURLToPath(new URL('../../scripts/libsql-migrate.mjs', import.
 const DOLT_SCHEMA = fileURLToPath(new URL('../../db/schema.sql', import.meta.url));
 
 function tempUrl(): string {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'fire-enrich-schema-'));
+  const dir = mkdtempSync(path.join(inject('tempDir'), 'schema-'));
   return `file:${path.join(dir, 'app.db')}`;
 }
 

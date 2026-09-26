@@ -30,7 +30,7 @@ vi.mock('firecrawl', () => ({
 
 import { DELETE, POST } from '@/app/api/chat/route';
 
-const AIMOCK_URL = process.env.AIMOCK_URL as string;
+import { AIMOCK_URL } from '../aimock';
 
 /** The table as the panel formats it. */
 const CONTEXT = {

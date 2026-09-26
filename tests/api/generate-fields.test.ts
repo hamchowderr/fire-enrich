@@ -13,6 +13,7 @@ import type { Profile } from '@/lib/profiles';
 import { FieldGenerationResponse } from '@/lib/types/field-generation';
 
 import plannerFixtures from '../../fixtures/planner-plan.json';
+import { AIMOCK_URL } from '../aimock';
 
 /**
  * `POST /api/generate-fields` through the planner agent and AIMock.
@@ -30,7 +31,6 @@ import plannerFixtures from '../../fixtures/planner-plan.json';
  *
  * Requires AIMock on `AIMOCK_URL` (`npm run test:ai` starts it).
  */
-const AIMOCK_URL = process.env.AIMOCK_URL as string;
 const ROUTE = '/api/generate-fields';
 
 const [fixture, genericFixture] = plannerFixtures.fixtures;

@@ -60,7 +60,7 @@ vi.mock('@/lib/mastra/models', async (importOriginal) => {
 import { mastra } from '@/lib/mastra';
 import { EnrichRowOutput, type EnrichRowInputType, type ResearchPlanType } from '@/lib/mastra/schemas';
 
-const AIMOCK_URL = process.env.AIMOCK_URL as string;
+import { AIMOCK_URL } from '../aimock';
 
 const READS_SCRAPE_URL = 'https://www.firecrawl.dev/careers?check=eager-tool-execution-reads';
 const FALLBACK_SCRAPE_URL = 'https://www.firecrawl.dev/careers?check=eager-tool-execution-fallback';

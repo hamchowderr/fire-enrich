@@ -37,7 +37,7 @@ vi.mock('firecrawl', () => ({
 import { mastra } from '@/lib/mastra';
 import { EnrichRowOutput, type EnrichRowInputType, type ResearchPlanType } from '@/lib/mastra/schemas';
 
-const AIMOCK_URL = process.env.AIMOCK_URL as string;
+import { AIMOCK_URL } from '../aimock';
 
 /** The note on the fallback value, which a model can also write on its own. */
 const FALLBACK_NOTE = 'The research result did not match the expected format, so no findings were kept.';
