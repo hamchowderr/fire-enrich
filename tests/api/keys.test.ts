@@ -75,7 +75,10 @@ import { POST as chat } from '@/app/api/chat/route';
 import { POST as scrape } from '@/app/api/scrape/route';
 import { GET as checkEnv } from '@/app/api/check-env/route';
 
-/** What the UI still sends on every request; the routes must ignore it. */
+/**
+ * What upstream's UI sends on every request, and a browser holding a key from
+ * an older build still can; the routes must ignore it.
+ */
 const BROWSER_HEADERS = {
   'content-type': 'application/json',
   'X-Firecrawl-API-Key': 'fc-from-browser',
@@ -329,7 +332,6 @@ describe('GET /api/check-env', () => {
     expect(Object.keys(body.environmentStatus).sort()).toEqual([
       'AI_GATEWAY_API_KEY',
       'FIRECRAWL_API_KEY',
-      'OPENAI_API_KEY',
       'TURSO_DATABASE_URL',
     ]);
     for (const value of Object.values(body.environmentStatus)) {
@@ -338,8 +340,6 @@ describe('GET /api/check-env', () => {
     expect(body.environmentStatus).toEqual({
       FIRECRAWL_API_KEY: true,
       AI_GATEWAY_API_KEY: true,
-      // The UI reads the gateway key's presence under this name.
-      OPENAI_API_KEY: true,
       TURSO_DATABASE_URL: true,
     });
     expect(body.optional.dolt).toEqual({
@@ -363,7 +363,6 @@ describe('GET /api/check-env', () => {
     const body = await (await checkEnv()).json();
 
     expect(body.environmentStatus.AI_GATEWAY_API_KEY).toBe(true);
-    expect(body.environmentStatus.OPENAI_API_KEY).toBe(true);
     expect(JSON.stringify(body)).not.toContain(OIDC_TOKEN);
   });
 
@@ -376,7 +375,6 @@ describe('GET /api/check-env', () => {
     expect(body.environmentStatus).toEqual({
       FIRECRAWL_API_KEY: false,
       AI_GATEWAY_API_KEY: true,
-      OPENAI_API_KEY: true,
       TURSO_DATABASE_URL: false,
     });
     expect(JSON.stringify(body)).not.toContain(OIDC_TOKEN);
@@ -390,7 +388,6 @@ describe('GET /api/check-env', () => {
     expect(body.environmentStatus).toEqual({
       FIRECRAWL_API_KEY: false,
       AI_GATEWAY_API_KEY: false,
-      OPENAI_API_KEY: false,
       TURSO_DATABASE_URL: false,
     });
   });
@@ -467,6 +464,21 @@ describe('app/api source', () => {
       .filter((file) => /x-[\w-]*api-key/i.test(readFileSync(file, 'utf8')))
       .map((file) => path.relative(apiDir, file));
 
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('app source', () => {
+  it('asks for no OpenAI key', () => {
+    const appDir = fileURLToPath(new URL('../../app', import.meta.url));
+    const files = sourceFiles(appDir);
+    expect(files.length).toBeGreaterThan(0);
+
+    // The status field, the browser storage key and the request header the
+    // upstream UI used for a model key the server never reads.
+    const offenders = files
+      .filter((file) => /OPENAI_API_KEY|openai_api_key|x-openai-api-key/i.test(readFileSync(file, 'utf8')))
+      .map((file) => path.relative(appDir, file));
     expect(offenders).toEqual([]);
   });
 });
