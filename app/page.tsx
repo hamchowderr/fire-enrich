@@ -26,8 +26,6 @@ import HeroScraping from "@/components/app/(home)/sections/hero-scraping/HeroScr
 import HeaderBrandKit from "@/components/shared/header/BrandKit/BrandKit";
 import HeaderWrapper from "@/components/shared/header/Wrapper/Wrapper";
 import HeaderDropdownWrapper from "@/components/shared/header/Dropdown/Wrapper/Wrapper";
-import GithubIcon from "@/components/shared/header/Github/_svg/GithubIcon";
-import ButtonUI from "@/components/shared/button/button";
 
 // Ui Imports
 import { toast } from "sonner";
@@ -215,36 +213,12 @@ export default function HomePage() {
               <div className="flex gap-24 items-center">
                 <HeaderBrandKit />
               </div>
-              <div className="flex gap-8">
-                <a
-                  className="contents"
-                  href="https://github.com/firecrawl/fire-enrich"
-                  target="_blank"
-                >
-                  <ButtonUI variant="tertiary">
-                    <GithubIcon />
-                    Use this Template
-                  </ButtonUI>
-                </a>
-              </div>
             </div>
           ) : (
             <HeaderWrapper>
               <div className="max-w-[900px] mx-auto w-full flex justify-between items-center">
                 <div className="flex gap-24 items-center">
                   <HeaderBrandKit />
-                </div>
-                <div className="flex gap-8">
-                  <a
-                    className="contents"
-                    href="https://github.com/firecrawl/fire-enrich"
-                    target="_blank"
-                  >
-                    <ButtonUI variant="tertiary">
-                      <GithubIcon />
-                      Use this Template
-                    </ButtonUI>
-                  </a>
                 </div>
               </div>
             </HeaderWrapper>
