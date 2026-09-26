@@ -35,9 +35,9 @@ if (process.env.EVIDENCE_LIVE === '1' && process.env.AI_GATEWAY_API_KEY) {
 process.env.AI_GATEWAY_API_KEY = 'stub';
 process.env.FIRECRAWL_API_KEY = 'stub';
 process.env.MASTRA_TELEMETRY_DISABLED = '1';
-// The evidence-support check is on by default and calls a real evaluation
-// model; tests that need it on set it themselves
-// (tests/workflows/evidence-check.test.ts).
+// The evidence-support check calls a real evaluation model. It is off by
+// default; this pins it off even if the shell turns it on. Tests that need it
+// on set it themselves (tests/workflows/evidence-check.test.ts).
 process.env.EVIDENCE_CHECK = '0';
 
 process.env.TURSO_DATABASE_URL = `file:${path.join(inject('tempDir'), `store-${process.pid}.db`)}`;

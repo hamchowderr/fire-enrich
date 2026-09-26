@@ -17,8 +17,13 @@
  *
  * Read from the environment on every call, like the other switches in this app:
  *
- * - `EVIDENCE_CHECK`: on by default. `0` or `false` turns the check off; any
- *   other value, or none, leaves it on.
+ * - `EVIDENCE_CHECK`: off by default. `1`, `true`, `on`, `yes` or `enabled`
+ *   turns the check on; `0`, `false`, `off`, `no` or `disabled` turns it off
+ *   (trimmed, any case). An empty or unrecognised value uses the default.
+ *   Turning it on by default waits for a check of the question on held-out
+ *   findings (tests/evidence).
+ * - Cost: when on, each finding with a value is one paid gateway call per
+ *   run, and a failing or slow call can add up to the 3 s timeout per group.
  * - `EVIDENCE_CHECK_THRESHOLD`: the probability a finding needs to be kept,
  *   in [0, 1]. Default 0.5; anything unparsable or out of range uses it.
  *
@@ -43,6 +48,19 @@ import type { FindingType } from './schemas';
 export const EVIDENCE_MODEL_ID = 'typesafe-ai/jev';
 
 const DEFAULT_THRESHOLD = 0.5;
+
+/** Off until the question is checked on held-out findings (tests/evidence). */
+const DEFAULT_ENABLED = false;
+
+const ON_VALUES = new Set(['1', 'true', 'on', 'yes', 'enabled']);
+const OFF_VALUES = new Set(['0', 'false', 'off', 'no', 'disabled']);
+
+function parseSwitch(value: string | undefined): boolean {
+  const flag = value?.trim().toLowerCase() ?? '';
+  if (ON_VALUES.has(flag)) return true;
+  if (OFF_VALUES.has(flag)) return false;
+  return DEFAULT_ENABLED;
+}
 
 /** Per-call budget; the spike measured a median of ~0.35 s. */
 const DEFAULT_TIMEOUT_MS = 3_000;
@@ -94,12 +112,11 @@ interface EvidenceCheckConfig {
 
 /** The check's switch and threshold, read from the environment. */
 export function evidenceCheckConfig(env: Readonly<Record<string, string | undefined>> = process.env): EvidenceCheckConfig {
-  const flag = env.EVIDENCE_CHECK?.trim().toLowerCase();
   const raw = env.EVIDENCE_CHECK_THRESHOLD?.trim();
   const parsed = raw ? Number(raw) : Number.NaN;
 
   return {
-    enabled: flag !== '0' && flag !== 'false',
+    enabled: parseSwitch(env.EVIDENCE_CHECK),
     threshold: Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : DEFAULT_THRESHOLD,
   };
 }

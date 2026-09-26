@@ -151,23 +151,25 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 `POST /api/enrich` runs the `enrichRow` workflow (`lib/mastra/workflows/enrich-row.ts`) per row through `lib/mastra/enrich-adapter.ts`. `POST /api/chat` streams the `chat` agent (`lib/mastra/agents/chat.ts`), which answers from the enriched table or searches the web with the Firecrawl tools.
 
-### Evidence-support check (on by default)
+### Evidence-support check (off by default)
 
-The research step runs a second check after `checkFindings`, unless `EVIDENCE_CHECK` is `0` or `false`: the
+`EVIDENCE_CHECK=1` (or `true`, `on`, `yes`, `enabled`; `0`, `false`, `off`, `no`, `disabled` mean off) turns on a second check in the research step, after `checkFindings`: the
 `evidence-support` Classifier (`lib/mastra/evidence-support.ts`, model `typesafe-ai/jev` on the
 AI Gateway, registered on the Mastra instance; traced only when observability is configured) asks whether each finding's quote supports its value,
 one call per finding, in parallel. A finding below `EVIDENCE_CHECK_THRESHOLD` (default `0.5`) is
 withdrawn the same way `checkFindings` withdraws one with no read evidence, so it shows as unknown.
 Both are read from `process.env` on every row. The check fails open: an error or a call over 3 s
 keeps the finding and logs one `[EVIDENCE]` warning per group. A cancelled run makes no more calls.
-AIMock cannot serve evaluation models, so `tests/setup.ts` and the Playwright server set
+When on, each finding with a value is one paid gateway call per run, and a failure can add up to
+3 s per group. AIMock cannot serve evaluation models, so `tests/setup.ts` and the Playwright server pin
 `EVIDENCE_CHECK=0`, and tests use a hand-written `Experimental_EvaluationModelV4`
 (`tests/unit/evidence-support.test.ts`) or spy on the registered classifier's model. The AI SDK
 evaluation API is experimental. The question tells factual fields (the quote must state the value)
 from classification fields (the category must be the plain reading of the quote).
 `tests/evidence/evidence-support.live.test.ts` measures the check on a labeled set
 (`tests/evidence/labeled-findings.json`) against the real gateway; it is skipped unless
-`EVIDENCE_LIVE=1`, and costs one call per finding.
+`EVIDENCE_LIVE=1`, and costs one call per finding. The question was tuned on that set, so turning
+the check on by default waits for a check on held-out findings (items marked `heldOut` in the set).
 
 ## Conventions & Patterns
 

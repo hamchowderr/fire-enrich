@@ -8,6 +8,8 @@
  * what a run sends. It prints each finding's score and, per field type
  * (quoted or classification), how many correct values the threshold drops and
  * how many wrong values it keeps, at 0.5 and across a sweep of thresholds.
+ * Items marked `heldOut` were added after the question was tuned; they are
+ * also reported on their own, as the held-out check.
  *
  * Run it with `EVIDENCE_LIVE=1` set and the gateway key injected, for example:
  *
@@ -22,7 +24,9 @@
  *
  * Optional variables:
  * - `EVIDENCE_LIVE_MAX_CALLS`: hard cap on gateway calls, retries included.
- *   Default: the size of the set. A call past the cap fails instead of being made.
+ *   Default: the size of the set. A call past the cap fails instead of being
+ *   made. A value that is not a positive whole number fails the test before
+ *   any call.
  * - `EVIDENCE_LIVE_OUT`: path of a JSON file to write the scores to.
  * - `EVIDENCE_CHECK_THRESHOLD`: the threshold the keep/drop column uses.
  *
@@ -55,6 +59,8 @@ interface LabeledFinding {
   quote: string;
   label: 'supported' | 'unsupported';
   note?: string;
+  /** Added after the question was tuned on the rest of the set. */
+  heldOut?: boolean;
 }
 
 interface LabeledSet {
@@ -74,6 +80,34 @@ const TIMEOUT_MS = 15_000;
 const SWEEP = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
 
 const live = process.env.EVIDENCE_LIVE === '1';
+
+/**
+ * The call cap: the set size when unset, else a positive whole number. Any
+ * other value throws, so a typo can never lift the cap.
+ */
+function parseMaxCalls(raw: string | undefined, setSize: number): number {
+  if (raw === undefined || raw.trim() === '') return setSize;
+  const value = Number(raw.trim());
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`EVIDENCE_LIVE_MAX_CALLS must be a positive whole number, got ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+describe('parseMaxCalls', () => {
+  it('defaults to the set size', () => {
+    expect(parseMaxCalls(undefined, 75)).toBe(75);
+    expect(parseMaxCalls('  ', 75)).toBe(75);
+  });
+
+  it('reads a positive whole number', () => {
+    expect(parseMaxCalls('40', 75)).toBe(40);
+  });
+
+  it.each(['abc', 'NaN', '0', '-5', '2.5', 'Infinity'])('rejects %j instead of lifting the cap', (raw) => {
+    expect(() => parseMaxCalls(raw, 75)).toThrow(/positive whole number/);
+  });
+});
 
 function keyOf(state: { field: unknown; value: unknown; quote: unknown }): string {
   return JSON.stringify([state.field, state.value, state.quote]);
@@ -109,7 +143,7 @@ describe.skipIf(!live)('evidence check on the labeled set (live gateway)', () =>
     const apiKey = process.env.EVIDENCE_LIVE_GATEWAY_KEY;
     expect(apiKey, 'EVIDENCE_LIVE=1 needs AI_GATEWAY_API_KEY in the environment').toBeTruthy();
 
-    const maxCalls = Number(process.env.EVIDENCE_LIVE_MAX_CALLS ?? set.findings.length);
+    const maxCalls = parseMaxCalls(process.env.EVIDENCE_LIVE_MAX_CALLS, set.findings.length);
     const { threshold } = evidenceCheckConfig();
 
     // The real gateway model, wrapped to count calls, enforce the cap and
@@ -163,8 +197,13 @@ describe.skipIf(!live)('evidence check on the labeled set (live gateway)', () =>
       );
     }
 
-    for (const fieldType of ['quoted', 'classification', 'all'] as const) {
-      const group = fieldType === 'all' ? scored : scored.filter((s) => s.fieldType === fieldType);
+    const subsets = {
+      quoted: scored.filter((s) => s.fieldType === 'quoted'),
+      classification: scored.filter((s) => s.fieldType === 'classification'),
+      all: scored,
+      'held out': scored.filter((s) => s.heldOut),
+    };
+    for (const [fieldType, group] of Object.entries(subsets)) {
       lines.push('');
       lines.push(`## ${fieldType}`);
       lines.push(`supported:   ${spread(group.filter((s) => s.label === 'supported').map((s) => s.probability))}`);

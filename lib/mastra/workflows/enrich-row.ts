@@ -377,7 +377,7 @@ function researchGroupStep<TId extends string>(id: TId) {
   return createStep({
     id,
     description:
-      'Research one group of fields and keep only findings backed by pages the tools read (and, unless EVIDENCE_CHECK=0, by quotes that support the value).',
+      'Research one group of fields and keep only findings backed by pages the tools read (and, with EVIDENCE_CHECK on, by quotes that support the value).',
     inputSchema: ResearchItem,
     outputSchema: GroupResultSchema,
     stateSchema: WorkflowState,
@@ -430,8 +430,8 @@ function researchGroupStep<TId extends string>(id: TId) {
 
       const read = checkFindings(output.findings, group.fieldNames, readUrls);
 
-      // Second check: does each kept quote support its value? On unless
-      // EVIDENCE_CHECK=0 or false; see evidence-support.ts.
+      // Optional second check: does each kept quote support its value? Off
+      // unless EVIDENCE_CHECK turns it on; see evidence-support.ts.
       const evidenceCheck = evidenceCheckConfig();
       const supported = evidenceCheck.enabled
         ? await checkEvidenceSupport(read.findings, {
