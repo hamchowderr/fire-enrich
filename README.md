@@ -40,7 +40,7 @@ With [Dolt](#dolt-setup-optional) configured, each run is also recorded as a ver
 
 ## Environment variables
 
-`.env.example` lists every variable with a longer explanation. Copy it to `.env.local` for local development.
+`.env.example` explains each variable that is set by hand. The variables the platform sets and the test-only variables are listed in the tables below. Copy `.env.example` to `.env.local` for local development.
 
 ### Required
 
@@ -51,7 +51,7 @@ With [Dolt](#dolt-setup-optional) configured, each run is also recorded as a ver
 | `TURSO_DATABASE_URL` | Turso database URL (`libsql://…`). Required on Vercel, because serverless instances share no disk. Locally, leave it and `TURSO_AUTH_TOKEN` unset to use `.mastra/fire-enrich.db`. |
 | `TURSO_AUTH_TOKEN` | Turso auth token. Set it together with `TURSO_DATABASE_URL`. |
 
-The Turso integration on the Vercel Marketplace sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. When it is connected with a custom prefix, it sets `<PREFIX>_TURSO_DATABASE_URL` and `<PREFIX>_TURSO_AUTH_TOKEN` instead, and the app reads that pair. `TURSO_DATABASE_URL` wins when both are set. A half pair, a pair that mixes the two namings, or a token without a URL is an error: the Vercel build fails before building, and the app throws, each naming the variables.
+The Turso integration on the Vercel Marketplace sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. When it is connected with a custom prefix, it sets `<PREFIX>_TURSO_DATABASE_URL` and `<PREFIX>_TURSO_AUTH_TOKEN` instead, and the app reads that pair. `TURSO_DATABASE_URL` wins when both are set. A half pair, a pair that mixes the two namings, a token without a URL, or two complete `<PREFIX>_TURSO_*` pairs without `TURSO_DATABASE_URL` is an error: the Vercel build fails before building, and the app throws, each naming the variables.
 
 Do not point a local `.env.local` at the production Turso database: local runs create the app's tables on first use.
 
@@ -157,7 +157,7 @@ The build, test and lint commands, the test harness, and the rules for database 
 
 ## Dolt setup (optional)
 
-Dolt adds versioned run history: each enrichment run is recorded with its values and evidence, ends in one Dolt commit, and `GET /api/runs/:id/diff` compares it with the previous run of the same list. Without Dolt, runs still stream and are not recorded, and the run-history routes answer `501`.
+Dolt adds versioned run history: each enrichment run is recorded with its values and evidence, ends in one Dolt commit, and `GET /api/runs/:id/diff` compares it with the previous run of the same list. Without Dolt, runs still stream and are not recorded, and `GET /api/runs/:id/diff` answers `501`.
 
 [docs/dolt-setup.md](docs/dolt-setup.md) covers:
 
