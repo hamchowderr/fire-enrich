@@ -1,0 +1,51 @@
+# Dependabot version updates.
+# Options reference:
+# https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
+#
+# No `target-branch`: Dependabot then uses the default branch, `main`. Setting
+# `target-branch` would stop the options below from applying to security
+# updates, which always target the default branch.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    allow:
+      # For npm, "all" covers every dependency named in package.json. The
+      # reference lists `indirect` (lockfile-only packages such as
+      # caniuse-lite) for bundler, pip, composer, cargo, gomod and uv only,
+      # not npm. So this rule does not update lockfile-only packages.
+      - dependency-type: "all"
+    ignore:
+      # Keep agent-browser at 0.19.0. @mastra/agent-browser uses the JS API
+      # that agent-browser 0.20 removed, and it pins 0.19.0 itself. See
+      # https://github.com/mastra-ai/mastra/issues/25204
+      - dependency-name: "agent-browser"
+    groups:
+      # next and eslint-config-next are both pinned to the same exact
+      # version, so update them in one PR, majors included. A dependency
+      # goes into the first group it matches, so this group comes first.
+      next:
+        patterns:
+          - "next"
+          - "eslint-config-next"
+      # Every other minor and patch update goes into one PR. Each major
+      # update gets its own PR.
+      npm-minor-patch:
+        patterns:
+          - "*"
+        # @vercel/oidc is pinned to the exact version @ai-sdk/gateway pins.
+        # Its updates get their own PR, so closing one does not drop the
+        # rest of the week's updates.
+        exclude-patterns:
+          - "@vercel/oidc"
+        update-types:
+          - "minor"
+          - "patch"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
