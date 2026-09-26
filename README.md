@@ -177,6 +177,12 @@ Field configuration:
 
 ![Configure Enrichment page with the uploaded rows, the detected email column and the field picker](docs/images/configure-fields.png)
 
+Results:
+
+![Completed enrichment of three rows with company name, description and industry, the CSV and JSON export buttons, and the chat panel](docs/images/results.jpg)
+
+✕ marks a field for which no value was found.
+
 ## Credits and license
 
 Fire Enrich was created by [Firecrawl](https://www.firecrawl.dev/) as [firecrawl/fire-enrich](https://github.com/firecrawl/fire-enrich) and is released under the MIT License. This fork keeps that license. See [LICENSE](LICENSE).
