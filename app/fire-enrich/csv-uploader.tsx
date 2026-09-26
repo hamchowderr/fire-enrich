@@ -4,6 +4,10 @@ import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import Papa from "papaparse";
 import { CSVRow } from "@/lib/types";
+import {
+  CSV_PARSE_CONFIG,
+  readCsvParseResult,
+} from "@/lib/utils/csv-upload";
 import { Upload, Download, AtSign, InfinityIcon } from "lucide-react";
 import Button from "@/components/shared/button/button";
 import Link from "next/link";
@@ -24,44 +28,17 @@ export function CSVUploader({ onUpload }: CSVUploaderProps) {
       setError(null);
       setFileName(file.name);
 
-      Papa.parse(file, {
+      Papa.parse<CSVRow, File>(file, {
+        ...CSV_PARSE_CONFIG,
         complete: (results) => {
-          if (results.errors.length > 0) {
-            setError(`CSV parsing error: ${results.errors[0].message}`);
-            setIsProcessing(false);
-            return;
-          }
-
-          if (!results.data || results.data.length === 0) {
-            setError("CSV file is empty");
-            setIsProcessing(false);
-            return;
-          }
-
-          // Get headers from first row
-          const headers = Object.keys(results.data[0] as object);
-          const rows = results.data as CSVRow[];
-
-          // Filter out empty rows
-          const validRows = rows.filter((row) =>
-            Object.values(row).some(
-              (value) => value && String(value).trim() !== "",
-            ),
-          );
-
-          if (validRows.length === 0) {
-            setError("No valid data rows found in CSV");
-            setIsProcessing(false);
-            return;
-          }
-
+          const parsed = readCsvParseResult(results);
           setIsProcessing(false);
-          onUpload(validRows, headers);
+          if ("error" in parsed) {
+            setError(parsed.error);
+            return;
+          }
+          onUpload(parsed.rows, parsed.columns);
         },
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: (header) => header.trim(),
-        transform: (value) => value.trim(),
       });
     },
     [onUpload],
