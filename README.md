@@ -62,6 +62,8 @@ Do not point a local `.env.local` at the production Turso database: local runs c
 | `FIRECRAWL_API_URL` | `https://api.firecrawl.dev` | Firecrawl API origin, for a self-hosted Firecrawl. |
 | `EVIDENCE_CHECK` | off | `1` turns on a second evidence check: an evaluation model (`typesafe-ai/jev` on the AI Gateway) scores whether each finding's quote supports its value. The AI SDK evaluation API it uses is experimental. |
 | `EVIDENCE_CHECK_THRESHOLD` | `0.5` | Score, from 0 to 1, a finding needs to be kept when `EVIDENCE_CHECK=1`. A finding below it is left unknown. |
+| `TRACING` | on | `0` turns tracing off. On, workflow runs, agent and tool calls and evidence-support checks are recorded as trace spans in the Turso database (or the local file), viewable in Mastra Studio (see below). |
+| `TRACING_SAMPLE_RATE` | `1` | Share of traces kept, from 0 to 1. Each trace is kept or dropped whole. |
 | `DEFAULT_PROFILE_ID` | newest profile | Business profile the planner uses when a request names none. Profiles are created with `POST /api/profiles`. With no profiles, the planner uses a generic one. |
 | `LIBSQL_PREVIEW_MIGRATE` | unset | `1` also creates the app's Turso tables on Vercel Preview builds. Set it only when Preview uses a different Turso database from Production. |
 | `UPSTASH_REDIS_REST_URL` | unset | With `UPSTASH_REDIS_REST_TOKEN`, limits each IP to 50 `/api/scrape` requests a day. Unset: no rate limiting. |
@@ -152,6 +154,12 @@ Requirements: Node.js 24 and npm.
 5. Open [http://localhost:3000](http://localhost:3000). The upload page links a sample CSV (`public/sample-data.csv`).
 
 `npm run studio` starts [Mastra Studio](https://mastra.ai/docs) on the agents and workflows in `lib/mastra`.
+
+### Traces
+
+With tracing on (the default), each enrichment row is a trace: the `enrichRow` workflow, its steps, the agents' model and tool calls (without a span per streamed chunk), and one `evidence-support: <field>` span per finding checked when `EVIDENCE_CHECK=1`. That span records the field, the probability of support, the threshold and the decision (`kept`, `dropped`, `failed` or `cancelled`), with the value and quote cut to 500 characters. The planner and chat agents record traces of their own. Spans are written to the `mastra_ai_spans` table of the libSQL database that `TURSO_DATABASE_URL` names, or of the local file when it is unset. On Vercel, each route writes its remaining spans in `after()`, once the response has ended.
+
+To view them, run `npm run studio` with the same `TURSO_*` values the app uses (from `.env.local`, or `npx mastra dev --dir lib/mastra --env <file>`), open Studio and select Observability. With no `TURSO_*` values, Studio and `npm run dev` share `.mastra/fire-enrich.db`.
 
 The build, test and lint commands, the test harness, and the rules for database schema changes are in [CLAUDE.md](CLAUDE.md). `npm run check` runs what CI runs.
 

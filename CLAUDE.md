@@ -155,7 +155,7 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 `EVIDENCE_CHECK=1` turns on a second check in the research step, after `checkFindings`: the
 `evidence-support` Classifier (`lib/mastra/evidence-support.ts`, model `typesafe-ai/jev` on the
-AI Gateway, registered on the Mastra instance; traced only when observability is configured) asks whether each finding's quote supports its value,
+AI Gateway, registered on the Mastra instance) asks whether each finding's quote supports its value,
 one call per finding, in parallel. A finding below `EVIDENCE_CHECK_THRESHOLD` (default `0.5`) is
 withdrawn the same way `checkFindings` withdraws one with no read evidence, so it shows as unknown.
 Both are read from `process.env` on every row. The check fails open: an error or a call over 3 s
@@ -163,6 +163,25 @@ keeps the finding and logs one `[EVIDENCE]` warning per group. A cancelled run m
 AIMock cannot serve evaluation models, so tests use a hand-written `Experimental_EvaluationModelV4`
 (`tests/unit/evidence-support.test.ts`) or spy on the registered classifier's model. The AI SDK
 evaluation API is experimental.
+
+### Tracing (on by default)
+
+`lib/mastra/tracing.ts` gives the Mastra instance an `Observability` (`@mastra/observability`,
+service name `fire-enrich`) with one `MastraStorageExporter`, which writes spans to the
+instance's own libSQL store, table `mastra_ai_spans`. LibSQLStore creates that table at init
+whether or not tracing is on, so tracing adds no migration. `TRACING=0` turns it off;
+`TRACING_SAMPLE_RATE` (default `1`) samples whole traces. Per-chunk model spans
+(`MODEL_CHUNK`) are excluded to limit storage; they are leaves, so no span loses its parent. `checkEvidenceSupport` records one
+`evidence-support: <field>` child span of the research step per finding it checks, with
+`field`, `probability`, `threshold` and `decision` (`kept`, `dropped`, `failed`, `cancelled`)
+in its metadata and the value and quote cut to 500 characters; the classifier's
+`CLASSIFIER_EVALUATION` span, which records no answers, nests under it. The exporter
+batches writes, so `/api/enrich`, `/api/chat` and `/api/generate-fields` call
+`flushTracesAfter` (`lib/flush-traces.ts`), which flushes inside `after()` once the
+response has ended. It lives outside `lib/mastra` so Studio's bundle does not import
+Next.js. `tests/setup.ts` sets `TRACING=0`; `tests/unit/evidence-support.test.ts` checks
+the spans with its own `Observability` and an in-memory exporter. Traces are viewed in
+Studio (`npm run studio`) pointed at the same `TURSO_*` database.
 
 ## Conventions & Patterns
 

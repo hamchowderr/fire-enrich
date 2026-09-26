@@ -37,6 +37,7 @@
     "@mastra/core": "^1.71.0",
     "@mastra/libsql": "^1.23.3",
     "@mastra/memory": "^1.32.1",
+    "@mastra/observability": "^1.18.1",
     "@radix-ui/react-dialog": "^1.1.13",
     "@radix-ui/react-label": "^2.1.6",
     "@radix-ui/react-select": "^2.2.4",
