@@ -25,11 +25,19 @@ vi.mock('next/server', async (importOriginal) => ({
 process.env.USE_AIMOCK = 'true';
 process.env.AIMOCK_URL ??= 'http://127.0.0.1:4010';
 
+// The opt-in live measurement of the evidence check
+// (tests/evidence/evidence-support.live.test.ts, EVIDENCE_LIVE=1) passes the
+// real gateway key to its own evaluation model under a separate name. The
+// global key is still stubbed, so nothing else can reach the gateway.
+if (process.env.EVIDENCE_LIVE === '1' && process.env.AI_GATEWAY_API_KEY) {
+  process.env.EVIDENCE_LIVE_GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY;
+}
 process.env.AI_GATEWAY_API_KEY = 'stub';
 process.env.FIRECRAWL_API_KEY = 'stub';
 process.env.MASTRA_TELEMETRY_DISABLED = '1';
-// The evidence-support check calls a real evaluation model; tests that need it
-// on set it themselves (tests/workflows/evidence-check.test.ts).
+// The evidence-support check is on by default and calls a real evaluation
+// model; tests that need it on set it themselves
+// (tests/workflows/evidence-check.test.ts).
 process.env.EVIDENCE_CHECK = '0';
 
 process.env.TURSO_DATABASE_URL = `file:${path.join(inject('tempDir'), `store-${process.pid}.db`)}`;

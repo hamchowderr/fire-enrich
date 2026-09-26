@@ -59,6 +59,9 @@ export default defineConfig({
       OPENAI_API_KEY: 'mock',
       FIRECRAWL_API_URL: `http://127.0.0.1:${FIRECRAWL_STUB_PORT}`,
       AI_GATEWAY_API_KEY: 'stub',
+      // The evidence check is on by default and AIMock cannot serve its
+      // evaluation model; off, so no call goes to the gateway.
+      EVIDENCE_CHECK: '0',
       FIRECRAWL_API_KEY: 'stub',
       TURSO_DATABASE_URL: 'file:./.mastra/e2e.db',
       TURSO_AUTH_TOKEN: '',

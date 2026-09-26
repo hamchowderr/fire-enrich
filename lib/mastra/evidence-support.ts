@@ -17,7 +17,8 @@
  *
  * Read from the environment on every call, like the other switches in this app:
  *
- * - `EVIDENCE_CHECK`: `1` or `true` turns the check on. Off by default.
+ * - `EVIDENCE_CHECK`: on by default. `0` or `false` turns the check off; any
+ *   other value, or none, leaves it on.
  * - `EVIDENCE_CHECK_THRESHOLD`: the probability a finding needs to be kept,
  *   in [0, 1]. Default 0.5; anything unparsable or out of range uses it.
  *
@@ -34,8 +35,12 @@ import { Classifier } from '@mastra/core/classifier';
 import { unsupportedFinding } from './mappers';
 import type { FindingType } from './schemas';
 
-/** Gateway id of the evaluation model. `jev-latest` is the direct-provider id. */
-const EVIDENCE_MODEL_ID = 'typesafe-ai/jev';
+/**
+ * Gateway id of the evaluation model. `jev-latest` is the direct-provider id.
+ *
+ * @public The live measurement (tests/evidence) builds its model from it.
+ */
+export const EVIDENCE_MODEL_ID = 'typesafe-ai/jev';
 
 const DEFAULT_THRESHOLD = 0.5;
 
@@ -49,10 +54,13 @@ const QUESTIONS = {
   supported: {
     type: 'boolean',
     instructions:
-      'The state holds a data field (its name and description), a value reported for it, and a quote from a web page given as evidence. Does the quote, on its own, support that value for that field?',
+      'The state holds a data field (its name and description), a value reported for it, and a quote from a web page given as evidence. Does the quote, on its own, support that value for that field? ' +
+      'Fields are of two kinds. A factual field (a name, description, number, date, place, amount, URL or job title) is supported only when the quote states the value; rewording and rounding are fine, but a figure for a different quantity is not (one funding round is not total funding, forks are not stars, a copyright year is not a founding year). ' +
+      'A classification field (an industry, company type, business model, customer type or pricing model) asks for a category: it is supported when the category is the plain, reasonable reading of the quote, even if the quote does not name the category.',
     criteria: {
-      true: 'The quote states or directly implies the value for this field.',
-      false: 'The quote does not state the value, states a different value, or is about something else.',
+      true: 'The quote states the value, or, for a classification field, a reasonable reader would assign that category from the quote alone.',
+      false:
+        'The quote states a different value, gives a figure for a different quantity, needs facts it does not contain to reach the value, or is about something else.',
     },
   },
 } as const;
@@ -91,7 +99,7 @@ export function evidenceCheckConfig(env: Readonly<Record<string, string | undefi
   const parsed = raw ? Number(raw) : Number.NaN;
 
   return {
-    enabled: flag === '1' || flag === 'true',
+    enabled: flag !== '0' && flag !== 'false',
     threshold: Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : DEFAULT_THRESHOLD,
   };
 }
