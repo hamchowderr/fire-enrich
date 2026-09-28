@@ -31,6 +31,7 @@
  * `evidence` event per quote that survived the evidence check. Both reach a
  * `run.stream()` consumer as `workflow-step-output` chunks.
  */
+import type { ProcessInputStepArgs, ProcessInputStepResult } from '@mastra/core/processors';
 import { RequestContext } from '@mastra/core/request-context';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { z } from 'zod';
@@ -41,6 +42,7 @@ import { checkFindings, toEnrichments, type GroupResult } from '../mappers';
 import { restrictPlan } from '../plan-cache';
 import { readUrlsFromToolResult } from '../read-urls';
 import { resolvePlan } from '../plan-fallback';
+import { resolveModel } from '../models';
 import {
   CompanyContext,
   EnrichFieldDefinition,
@@ -67,6 +69,25 @@ const MAX_STEPS: Record<ResearchGroupType['strategy'], number> = {
 
 /** Model turns the identify call may take. */
 const IDENTIFY_MAX_STEPS = 6;
+
+/** Added to the system prompt of a call's last allowed step. */
+const LAST_STEP_NOTE =
+  'You have no tool calls left. Answer now from the pages you have already read; report a field as not found when they do not support it.';
+
+/**
+ * `prepareStep` for a tool loop capped at `maxSteps`: the last allowed step
+ * gets no tools (`toolChoice: 'none'`) and a note saying so, so the call ends
+ * on an answer rather than on a tool call. The structuring call (see
+ * {@link structuredOutputOptions}) runs only when the loop ends on a step that
+ * is not a tool call; a loop cut off by `maxSteps` mid-research would
+ * otherwise return no object at all.
+ */
+function answerOnLastStep(maxSteps: number) {
+  return ({ stepNumber, systemMessages }: ProcessInputStepArgs): ProcessInputStepResult | undefined =>
+    stepNumber >= maxSteps - 1
+      ? { toolChoice: 'none', systemMessages: [...systemMessages, { role: 'system', content: LAST_STEP_NOTE }] }
+      : undefined;
+}
 
 /**
  * One evidence quote, written to the step stream as the research step accepts it.
@@ -167,16 +188,44 @@ const GroupResultSchema = z.object({
 });
 
 /**
- * Returned when a research call does not produce a valid `PhaseOutput`.
- *
- * With `errorStrategy: 'fallback'` Mastra hands back this value instead of
- * throwing, so a group whose output misses the schema degrades to "no
- * findings" and the row still completes. The note is text the user sees; the
- * research step detects the fallback from `stream.usedFallbackValue`, never
- * from this note, so a model that writes the same words is not a failure.
+ * Used when a research call does not produce a valid `PhaseOutput`, so a group
+ * whose output misses the schema degrades to "no findings" and the row still
+ * completes. The note is text the user sees; the research step detects the
+ * failure from the parse of `stream.object`, never from this note, so a model
+ * that writes the same words is not a failure.
  */
 const STRUCTURED_OUTPUT_FAILED = 'The research result did not match the expected format, so no findings were kept.';
 const NO_FINDINGS: PhaseOutputType = { findings: [], notes: STRUCTURED_OUTPUT_FAILED };
+
+/**
+ * Structured output for an agent call that uses tools first.
+ *
+ * `model` puts Mastra in its processor mode: the agent runs its tool loop with
+ * no response format, and once the loop ends a separate structuring call turns
+ * the whole transcript (tool calls, tool results and the agent's last text)
+ * into the schema. Without `model` (direct mode), `@mastra/core` 1.71 checks
+ * the text of every model step against the schema, and the first result,
+ * valid or not, becomes `stream.object`. A model that writes a sentence before
+ * a tool call ("I'll search for ..."), as Claude does, then ends the call
+ * with the fallback even when its last step is a valid answer; and a loop
+ * that runs out of steps on a tool call has no answer to check at all.
+ *
+ * `errorStrategy: 'warn'` logs the validation error (each failing path and
+ * why) through the Mastra logger and leaves `stream.object` undefined.
+ * `'fallback'` would substitute a value without logging why, which is how a
+ * real run lost every reason for its failures. The caller parses
+ * `stream.object` and substitutes its own empty value.
+ */
+function structuredOutputOptions<TSchema extends typeof PhaseOutput | typeof CompanyContext>(
+  schema: TSchema,
+  researchModel: string | undefined
+) {
+  return {
+    schema,
+    model: resolveModel('research', researchModel),
+    errorStrategy: 'warn' as const,
+  };
+}
 
 /** Returned when the identify call does not produce a valid `CompanyContext`. */
 function unidentified(email: string): CompanyContextType {
@@ -325,12 +374,9 @@ const identifyStep = createStep({
       {
         requestContext: requestContextFor(inputData.models?.research),
         maxSteps: IDENTIFY_MAX_STEPS,
+        prepareStep: answerOnLastStep(IDENTIFY_MAX_STEPS),
         abortSignal,
-        structuredOutput: {
-          schema: CompanyContext,
-          errorStrategy: 'fallback',
-          fallbackValue: unidentified(email),
-        },
+        structuredOutput: structuredOutputOptions(CompanyContext, inputData.models?.research),
       }
     );
 
@@ -399,6 +445,7 @@ function researchGroupStep<TId extends string>(id: TId) {
       const stream = await agent.stream(renderGroupPrompt(item, company), {
         requestContext: requestContextFor(item.researchModel, group.strategy),
         maxSteps: MAX_STEPS[group.strategy],
+        prepareStep: answerOnLastStep(MAX_STEPS[group.strategy]),
         abortSignal,
         // Browser groups need a memory thread for the sub-agent's page tracking
         // (see agents/research.ts). History is not replayed: each group starts
@@ -412,21 +459,16 @@ function researchGroupStep<TId extends string>(id: TId) {
               },
             }
           : {}),
-        structuredOutput: {
-          schema: PhaseOutput,
-          errorStrategy: 'fallback',
-          fallbackValue: NO_FINDINGS,
-        },
+        structuredOutput: structuredOutputOptions(PhaseOutput, item.researchModel),
       });
 
       const readUrls = new Set<string>();
       await forwardStream(stream.fullStream, writer, group.id, readUrls);
 
+      // Undefined when the structuring call failed (see structuredOutputOptions).
       const parsed = PhaseOutput.safeParse(await stream.object);
       const output = parsed.success ? parsed.data : NO_FINDINGS;
-      // Read only after `stream.object` resolves: Mastra sets the flag when it
-      // processes the final object, and it starts out false.
-      const structuredOutputFailed = !parsed.success || stream.usedFallbackValue;
+      const structuredOutputFailed = !parsed.success;
 
       const read = checkFindings(output.findings, group.fieldNames, readUrls);
 

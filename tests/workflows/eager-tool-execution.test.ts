@@ -1,20 +1,27 @@
 /**
- * The research step under eager tool execution, which `@mastra/core` 1.71
+ * The research step and eager tool execution, which `@mastra/core` 1.71
  * turns on by default for `agent.stream()`: a tool starts as soon as its own
  * arguments are complete, while the model is still streaming the rest of the
  * step.
+ *
+ * Mastra does not start a tool eagerly when an output processor may still act
+ * on the step (`hasPostStreamProcessor` in `isEagerlyExecutableToolCall`). The
+ * research call asks for a structuring `model`, which adds Mastra's
+ * `StructuredOutputProcessor` (it has `processOutputStep`), so research tools
+ * start once the model has finished streaming the step. That is the cost of
+ * structuring the transcript after the tool loop (see `structuredOutputOptions`
+ * in `lib/mastra/workflows/enrich-row.ts`).
  *
  * One `enrichRow` run with two groups, every model call answered by AIMock
  * (`fixtures/research-eager.json`). In each group the model's first step calls
  * `search` and then `scrape`, streamed slowly (`latency`, `chunkSize`) so the
  * scrape arguments arrive well after the search arguments are complete:
  * - "Eager reads" then returns a valid answer citing one page from each tool.
- * - "Eager fallback" then returns text that is not JSON, so Mastra falls back.
+ * - "Eager fallback" then returns text that is not JSON, so structuring fails.
  *
- * The tests check that eager execution really happened (search starts before
- * the scrape arguments finish streaming), that each tool ran once, and that
- * the structured output, the read-url evidence check and `usedFallbackValue`
- * come out as they did with the whole step awaited.
+ * The tests check that the tools start together after the step (no eager
+ * start), that each tool ran once, and that the structured output and the
+ * read-url evidence check come out right.
  *
  * Requires AIMock on `AIMOCK_URL` (`npm run test:ai` starts it).
  */
@@ -66,8 +73,8 @@ const READS_SCRAPE_URL = 'https://www.firecrawl.dev/careers?check=eager-tool-exe
 const FALLBACK_SCRAPE_URL = 'https://www.firecrawl.dev/careers?check=eager-tool-execution-fallback';
 
 /**
- * The least time between the search and the scrape starting that shows the
- * search ran eagerly. The fixture streams the scrape arguments over about 20
+ * The least time between the search and the scrape starting that would show
+ * the search ran eagerly. The fixture streams the scrape arguments over about 20
  * chunks 25 ms apart after the search arguments are complete; awaiting the
  * whole step starts both tools within a few milliseconds of each other.
  */
@@ -176,15 +183,15 @@ function startedOnce(key: string): number {
   return times[0];
 }
 
-describe('research step under eager tool execution', () => {
-  it('starts each tool once, before the model finishes streaming the step', () => {
+describe('research step and eager tool execution', () => {
+  it('starts each tool once, after the model finishes streaming the step', () => {
     for (const [query, url] of [
       ['eager reads', READS_SCRAPE_URL],
       ['eager fallback', FALLBACK_SCRAPE_URL],
     ]) {
       const search = startedOnce(query);
       const scrape = startedOnce(url);
-      expect(scrape - search).toBeGreaterThanOrEqual(EAGER_GAP_MS);
+      expect(scrape - search).toBeLessThan(EAGER_GAP_MS);
     }
   });
 
@@ -198,7 +205,7 @@ describe('research step under eager tool execution', () => {
     );
   });
 
-  it('still reports a structured-output fallback as a failure', () => {
+  it('still reports a failed structured output as a failure', () => {
     expect(groupResult('fallback')).toMatchObject({ structuredOutputFailed: true, found: 0 });
     expect(completeEvent('fallback')).toMatchObject({ structuredOutputFailed: true });
     expect(output.unknown).toContainEqual({

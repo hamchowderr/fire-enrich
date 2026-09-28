@@ -11,6 +11,15 @@
     },
     {
       "match": {
+        "userMessage": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9}",
+        "systemMessage": "You are a data structuring specialist"
+      },
+      "response": {
+        "content": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9}"
+      }
+    },
+    {
+      "match": {
         "userMessage": "Research group: Eager reads",
         "systemMessage": "You research facts about one company",
         "hasToolResult": false
@@ -48,6 +57,15 @@
     },
     {
       "match": {
+        "userMessage": "{\"findings\":[{\"field\":\"homepage_headline\",\"value\":\"Power AI agents with clean web data\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"# Power AI agents with   clean web data\",\"confidence\":0.9}],\"sourcesAgree\":true},{\"field\":\"open_roles\",\"value\":\"Founding Engineer\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/careers?check=eager-tool-execution-reads\",\"quote\":\"We are hiring a Founding Engineer.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}",
+        "systemMessage": "You are a data structuring specialist"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"homepage_headline\",\"value\":\"Power AI agents with clean web data\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"# Power AI agents with   clean web data\",\"confidence\":0.9}],\"sourcesAgree\":true},{\"field\":\"open_roles\",\"value\":\"Founding Engineer\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/careers?check=eager-tool-execution-reads\",\"quote\":\"We are hiring a Founding Engineer.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
         "userMessage": "Research group: Eager fallback",
         "systemMessage": "You research facts about one company",
         "hasToolResult": false
@@ -78,6 +96,15 @@
         "userMessage": "Research group: Eager fallback",
         "systemMessage": "You research facts about one company",
         "hasToolResult": true
+      },
+      "response": {
+        "content": "Both pages were read, but this answer is not the JSON you asked for."
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Both pages were read, but this answer is not the JSON you asked for.",
+        "systemMessage": "You are a data structuring specialist"
       },
       "response": {
         "content": "Both pages were read, but this answer is not the JSON you asked for."
