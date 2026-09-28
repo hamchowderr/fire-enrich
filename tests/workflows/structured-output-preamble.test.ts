@@ -8,8 +8,11 @@
  * schema, not only the last one, and the first result it gets, valid or not,
  * becomes `stream.object`. A step that is only a sentence plus a tool call
  * then ends the group with no findings, even when the model's last step is a
- * valid answer. The research step now asks for a structuring `model`
- * (processor mode), which structures the transcript once the loop ends.
+ * valid answer. The loss is silent: on that path `usedFallbackValue` is false,
+ * so the group reported `structuredOutputFailed: false, found: 0`. The
+ * research step now asks for a structuring `model` (processor mode), which
+ * structures the transcript once the loop ends, with instructions that name
+ * the group's fields.
  *
  * One `enrichRow` run with three groups, every model call answered by AIMock
  * (`fixtures/research-preamble.json`):
@@ -168,5 +171,40 @@ describe('text before tool calls', () => {
 
     expect(groupResult('out')).toMatchObject({ structuredOutputFailed: false, found: 1 });
     expect(output.enrichments.homepage_headline?.value).toBe('Power AI agents with clean web data');
+  });
+
+  it('gives each structuring call the group’s field names and evidence rules, with the schema as its response format', async () => {
+    const journal = (await (await fetch(`${AIMOCK_URL}/__aimock/journal`)).json()) as Array<{
+      body: {
+        response_format?: { type?: string };
+        tools?: unknown[];
+        messages: Array<{ role: string; content: unknown }>;
+      };
+    }>;
+    const system = (body: (typeof journal)[number]['body']) =>
+      JSON.stringify(body.messages.filter((message) => message.role === 'system'));
+    const transcript = (body: (typeof journal)[number]['body']) =>
+      JSON.stringify(body.messages.filter((message) => message.role === 'user'));
+
+    // The last structuring call whose transcript holds the group's own search.
+    const structuringCall = (query: string) =>
+      journal
+        .map((entry) => entry.body)
+        .filter((body) => system(body).includes('You turn a research transcript') && transcript(body).includes(query))
+        .at(-1);
+
+    for (const [query, fieldName] of [
+      ['Firecrawl product', 'product_summary'],
+      ['Firecrawl funding', 'tagline'],
+      ['Firecrawl headline out of steps', 'homepage_headline'],
+    ]) {
+      const call = structuringCall(query);
+      expect(call, `structuring call for ${fieldName}`).toBeDefined();
+      expect(system(call!)).toContain(`Fields: ${fieldName}.`);
+      expect(system(call!)).toContain('word for word');
+      expect(system(call!)).toContain('leave the field out rather than guess');
+      expect(call!.response_format?.type).toBe('json_schema');
+      expect(call!.tools ?? []).toHaveLength(0);
+    }
   });
 });

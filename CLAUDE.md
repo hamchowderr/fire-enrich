@@ -149,7 +149,7 @@ and commit `fallow.baseline.json`; never add entries to it by hand to get a PR g
 
 ## Architecture Overview
 
-`POST /api/enrich` runs the `enrichRow` workflow (`lib/mastra/workflows/enrich-row.ts`) per row through `lib/mastra/enrich-adapter.ts`. `POST /api/chat` streams the `chat` agent (`lib/mastra/agents/chat.ts`), which answers from the enriched table or searches the web with the Firecrawl tools.
+`POST /api/enrich` runs the `enrichRow` workflow (`lib/mastra/workflows/enrich-row.ts`) per row through `lib/mastra/enrich-adapter.ts`. Each research group and each identify call makes one extra model call (the research model) after its tool loop: Mastra's structuring call (`structuredOutput.model`) turns the transcript into the typed result. `POST /api/chat` streams the `chat` agent (`lib/mastra/agents/chat.ts`), which answers from the enriched table or searches the web with the Firecrawl tools.
 
 ### Evidence-support check (off by default)
 

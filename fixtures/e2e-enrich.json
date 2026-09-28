@@ -59,7 +59,11 @@
     {
       "match": {
         "userMessage": "{\"findings\":[{\"field\":\"sells_to_businesses\",\"value\":true,\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"Trusted by 150,000+\",\"confidence\":0.8}],\"sourcesAgree\":true},{\"field\":\"target_customer\",\"value\":\"Teams building AI agents\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"Power AI agents with   clean web data\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}",
-        "systemMessage": "You are a data structuring specialist"
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: sells_to_businesses, target_customer."
+        ],
+        "responseFormat": "json_schema"
       },
       "response": {
         "content": "{\"findings\":[{\"field\":\"sells_to_businesses\",\"value\":true,\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"Trusted by 150,000+\",\"confidence\":0.8}],\"sourcesAgree\":true},{\"field\":\"target_customer\",\"value\":\"Teams building AI agents\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"Power AI agents with   clean web data\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"

@@ -19,6 +19,10 @@
  * - "Eager reads" then returns a valid answer citing one page from each tool.
  * - "Eager fallback" then returns text that is not JSON, so structuring fails.
  *
+ * The structuring calls also go to the Responses API here, which carries the
+ * schema as `text.format`, so their fixtures do not match on `responseFormat`
+ * (`structured-output-preamble.test.ts` checks the schema on Chat Completions).
+ *
  * The tests check that the tools start together after the step (no eager
  * start), that each tool ran once, and that the structured output and the
  * read-url evidence check come out right.

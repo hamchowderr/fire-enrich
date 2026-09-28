@@ -32,7 +32,11 @@
     {
       "match": {
         "userMessage": "{\"findings\":[{\"field\":\"product_summary\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}",
-        "systemMessage": "You are a data structuring specialist"
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: product_summary."
+        ],
+        "responseFormat": "json_schema"
       },
       "response": {
         "content": "{\"findings\":[{\"field\":\"product_summary\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}"
@@ -89,7 +93,11 @@
     {
       "match": {
         "userMessage": "{\"findings\":[{\"field\":\"tagline\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}",
-        "systemMessage": "You are a data structuring specialist"
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: tagline."
+        ],
+        "responseFormat": "json_schema"
       },
       "response": {
         "content": "{\"findings\":[{\"field\":\"tagline\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
@@ -98,7 +106,10 @@
     {
       "match": {
         "userMessage": "Research group: Out of steps",
-        "systemMessage": ["You research facts about one company", "You have no tool calls left."]
+        "systemMessage": [
+          "You research facts about one company",
+          "You have no tool calls left."
+        ]
       },
       "response": {
         "content": "The searches kept returning the Firecrawl homepage, whose headline is Power AI agents with clean web data."
@@ -123,8 +134,12 @@
     },
     {
       "match": {
-        "userMessage": "Firecrawl headline out of steps",
-        "systemMessage": "You are a data structuring specialist"
+        "userMessage": "The searches kept returning the Firecrawl homepage",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: homepage_headline."
+        ],
+        "responseFormat": "json_schema"
       },
       "response": {
         "content": "{\"findings\":[{\"field\":\"homepage_headline\",\"value\":\"Power AI agents with clean web data\",\"confidence\":0.7,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"# Power AI agents with   clean web data\",\"confidence\":0.7}],\"sourcesAgree\":true}],\"notes\":\"The search budget ran out before a final answer.\"}"

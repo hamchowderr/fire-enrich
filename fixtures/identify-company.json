@@ -31,7 +31,11 @@
     {
       "match": {
         "userMessage": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.95}",
-        "systemMessage": "You are a data structuring specialist"
+        "systemMessage": [
+          "You turn a research transcript",
+          "The email domain is firecrawl.dev."
+        ],
+        "responseFormat": "json_schema"
       },
       "response": {
         "content": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.95}"
