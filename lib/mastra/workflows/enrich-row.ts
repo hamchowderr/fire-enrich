@@ -247,7 +247,7 @@ function researchStructuringInstructions(fieldNames: readonly string[]): string 
     'You turn a research transcript (tool calls, tool results and the researcher’s final answer) into JSON that matches the response schema.',
     `Fields: ${fieldNames.join(', ')}. Use exactly these names in \`field\`, one finding per field, and no other names.`,
     'Report a value only when a tool result in the transcript supports it. Put the url of that page in `evidence.url` and copy the supporting text word for word from the tool result into `evidence.quote`.',
-    'When the transcript does not support a value for a field, leave the field out rather than guess. Never invent a url, a quote or a value, and never fill a field with a default.',
+    'When the transcript does not support a value for a field, report the field with value null, confidence 0 and empty evidence rather than guess. Never invent a url, a quote or a value, and never fill a field with a default.',
     '`notes`: one or two sentences on what was searched and what was not found.',
   ].join('\n');
 }

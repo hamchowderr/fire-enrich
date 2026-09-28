@@ -199,6 +199,10 @@ describe('research step and eager tool execution', () => {
     }
   });
 
+  it('identifies the company through the structuring call, not the unidentified fallback', () => {
+    expect(output.company).toMatchObject({ companyName: 'Firecrawl', domain: 'firecrawl.dev', confidence: 0.9 });
+  });
+
   it('keeps a valid answer and the evidence read by both tools', () => {
     expect(groupResult('reads')).toMatchObject({ structuredOutputFailed: false, found: 2 });
     expect(completeEvent('reads')).toMatchObject({ structuredOutputFailed: false, found: 2 });

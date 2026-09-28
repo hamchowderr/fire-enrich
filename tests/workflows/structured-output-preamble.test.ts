@@ -202,7 +202,7 @@ describe('text before tool calls', () => {
       expect(call, `structuring call for ${fieldName}`).toBeDefined();
       expect(system(call!)).toContain(`Fields: ${fieldName}.`);
       expect(system(call!)).toContain('word for word');
-      expect(system(call!)).toContain('leave the field out rather than guess');
+      expect(system(call!)).toContain('report the field with value null, confidence 0 and empty evidence rather than guess');
       expect(call!.response_format?.type).toBe('json_schema');
       expect(call!.tools ?? []).toHaveLength(0);
     }
