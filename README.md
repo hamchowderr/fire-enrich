@@ -60,8 +60,8 @@ Do not point a local `.env.local` at the production Turso database: local runs c
 | Variable | Default | Description |
 | --- | --- | --- |
 | `FIRECRAWL_API_URL` | `https://api.firecrawl.dev` | Firecrawl API origin, for a self-hosted Firecrawl. |
-| `EVIDENCE_CHECK` | off | `1` turns on a second evidence check: an evaluation model (`typesafe-ai/jev` on the AI Gateway) scores whether each finding's quote supports its value. The AI SDK evaluation API it uses is experimental. |
-| `EVIDENCE_CHECK_THRESHOLD` | `0.5` | Score, from 0 to 1, a finding needs to be kept when `EVIDENCE_CHECK=1`. A finding below it is left unknown. |
+| `EVIDENCE_CHECK` | off | `1` (or `true`, `on`, `yes`, `enabled`) turns on a second evidence check: an evaluation model (`typesafe-ai/jev` on the AI Gateway) scores whether each finding's quote supports its value. `0`, `false`, `off`, `no` or `disabled` leave it off. When on, each finding with a value is one paid gateway call per run, and a failing or slow call can add up to 3 s per research group. It is off by default because, on held-out findings, it dropped no correct value but did not catch the wrong values real runs produced (`tests/evidence/heldout-results.json`). The AI SDK evaluation API it uses is experimental. |
+| `EVIDENCE_CHECK_THRESHOLD` | `0.5` | Score, from 0 to 1, a finding needs to be kept when the evidence check is on. A finding below it is left unknown. |
 | `TRACING` | on | `0`, `false`, `off`, `no` or `disabled` turns tracing off. On, workflow runs, agent and tool calls and evidence-support checks are recorded as trace spans in the Turso database (or the local file). See [Traces](#traces). |
 | `TRACING_SAMPLE_RATE` | `1` | Share of traces kept, from 0 to 1. Each trace is kept or dropped whole. |
 | `TRACING_RETENTION_DAYS` | `14` | Days a trace span is kept before it is deleted. `0` keeps spans forever. |

@@ -431,7 +431,7 @@ function researchGroupStep<TId extends string>(id: TId) {
       const read = checkFindings(output.findings, group.fieldNames, readUrls);
 
       // Optional second check: does each kept quote support its value? Off
-      // unless EVIDENCE_CHECK is set; see evidence-support.ts.
+      // unless EVIDENCE_CHECK turns it on; see evidence-support.ts.
       const evidenceCheck = evidenceCheckConfig();
       const supported = evidenceCheck.enabled
         ? await checkEvidenceSupport(read.findings, {
