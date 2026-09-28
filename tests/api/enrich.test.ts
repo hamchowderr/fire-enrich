@@ -68,6 +68,7 @@ import { putPlan } from '@/lib/mastra/plan-cache';
 import type { ResearchPlanType } from '@/lib/mastra/schemas';
 
 import { AIMOCK_URL } from '../aimock';
+import { watchTraceFlush } from '../trace-flush';
 
 const plannedField = (name: string, displayName: string, strategy: 'search' | 'agent' | 'browser') => ({
   name,
@@ -240,6 +241,13 @@ describe('POST /api/enrich', () => {
     expect(result.enrichments.product_summary.sourceContext?.map((context) => context.url)).toEqual([
       'https://www.firecrawl.dev/',
     ]);
+  });
+
+  it('writes the session trace spans in after(), once the session has ended', { timeout: 120_000 }, async () => {
+    const runAfterTasks = watchTraceFlush();
+    const events = await readEvents(await post([{ email: 'hello@firecrawl.dev' }]));
+    expect(events.at(-1)).toMatchObject({ type: 'complete' });
+    await runAfterTasks();
   });
 
   it('skips a personal email without running it', { timeout: 30_000 }, async () => {

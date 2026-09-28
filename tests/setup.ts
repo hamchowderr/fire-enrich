@@ -39,6 +39,9 @@ process.env.MASTRA_TELEMETRY_DISABLED = '1';
 // default; this pins it off even if the shell turns it on. Tests that need it
 // on set it themselves (tests/workflows/evidence-check.test.ts).
 process.env.EVIDENCE_CHECK = '0';
+// No trace spans are written to the test database; the unit tests that check
+// spans build their own observability instance (tests/unit/evidence-support.test.ts).
+process.env.TRACING = '0';
 
 process.env.TURSO_DATABASE_URL = `file:${path.join(inject('tempDir'), `store-${process.pid}.db`)}`;
 delete process.env.TURSO_AUTH_TOKEN;

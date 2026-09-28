@@ -1,14 +1,19 @@
 import type { Metadata } from "next";
 import { GeistMono } from "geist/font/mono";
-import { Roboto_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import ColorStyles from "@/components/shared/color-styles/color-styles";
 import Scrollbar from "@/components/ui/scrollbar";
 import { Toaster } from "sonner";
 import "@/styles/main.css";
 
-const robotoMono = Roboto_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+// Roboto Mono, latin subset, weights 400-500 of the variable font: the file
+// Google Fonts serves for Roboto_Mono({ subsets: ["latin"], weight: ["400", "500"] }).
+// It is committed so the build makes no network request. Licence: app/fonts/RobotoMono-OFL.txt.
+const robotoMono = localFont({
+  src: "./fonts/RobotoMono-latin-wght.woff2",
+  weight: "400 500",
+  style: "normal",
+  display: "swap",
   variable: "--font-roboto-mono",
 });
 

@@ -381,7 +381,7 @@ function researchGroupStep<TId extends string>(id: TId) {
     inputSchema: ResearchItem,
     outputSchema: GroupResultSchema,
     stateSchema: WorkflowState,
-    execute: async ({ inputData: item, state, mastra, writer, abortSignal }) => {
+    execute: async ({ inputData: item, state, mastra, writer, abortSignal, tracingContext }) => {
       const { group } = item;
       // State is where the identify step left the company; the item carries a
       // copy so a step run on its own (Studio, a test) still has one.
@@ -440,6 +440,7 @@ function researchGroupStep<TId extends string>(id: TId) {
             fieldDescriptions: new Map(item.fields.map((field) => [field.name, field.description])),
             groupId: group.id,
             abortSignal,
+            tracingContext,
           })
         : { findings: read.findings, notes: [] };
       const checked = { findings: supported.findings, notes: [...read.notes, ...supported.notes] };

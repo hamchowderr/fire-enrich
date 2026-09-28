@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import type { EnrichmentRequest, RowEnrichmentResult } from '@/lib/types';
 import { loadSkipList, shouldSkipEmail, getSkipReason } from '@/lib/utils/skip-list';
 import { ENRICHMENT_CONFIG } from '@/lib/config/enrichment';
+import { flushTracesAfter } from '@/lib/flush-traces';
 import { gatewayConfigured } from '@/lib/gateway-auth';
 import {
   enrichRowWithMastra,
@@ -132,6 +133,9 @@ export async function POST(request: NextRequest) {
     // at any time, so the session is kept alive with `after` until its rows
     // settle and the run is committed.
     const sessionEnded = Promise.withResolvers<void>();
+    // Once it ends, the session's buffered trace spans are written, off the
+    // response path.
+    flushTracesAfter(sessionEnded.promise);
     after(sessionEnded.promise);
 
     // Create a streaming response
