@@ -4,8 +4,7 @@
       "match": {
         "userMessage": "Research group: Product and positioning",
         "systemMessage": "You research facts about one company",
-        "hasToolResult": false,
-        "responseFormat": "json_schema"
+        "hasToolResult": false
       },
       "response": {
         "toolCalls": [
@@ -23,7 +22,19 @@
       "match": {
         "userMessage": "Research group: Product and positioning",
         "systemMessage": "You research facts about one company",
-        "hasToolResult": true,
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"product_summary\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9},{\"url\":\"https://unread.example/about\",\"quote\":\"A quote from a page no tool returned.\",\"confidence\":0.5}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "{\"findings\":[{\"field\":\"product_summary\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9},{\"url\":\"https://unread.example/about\",\"quote\":\"A quote from a page no tool returned.\",\"confidence\":0.5}],\"sourcesAgree\":true}],\"notes\":\"\"}",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: product_summary."
+        ],
         "responseFormat": "json_schema"
       },
       "response": {
@@ -34,8 +45,7 @@
       "match": {
         "userMessage": "Research group: Open source footprint",
         "systemMessage": "You research facts about one company",
-        "hasToolResult": false,
-        "responseFormat": "json_schema"
+        "hasToolResult": false
       },
       "response": {
         "toolCalls": [
@@ -53,7 +63,19 @@
       "match": {
         "userMessage": "Research group: Open source footprint",
         "systemMessage": "You research facts about one company",
-        "hasToolResult": true,
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"open_source_repo\",\"value\":\"https://github.com/firecrawl/firecrawl\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://github.com/firecrawl/firecrawl\",\"quote\":\"\\\"github\\\": \\\"https://github.com/firecrawl/firecrawl\\\"\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "{\"findings\":[{\"field\":\"open_source_repo\",\"value\":\"https://github.com/firecrawl/firecrawl\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://github.com/firecrawl/firecrawl\",\"quote\":\"\\\"github\\\": \\\"https://github.com/firecrawl/firecrawl\\\"\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: open_source_repo."
+        ],
         "responseFormat": "json_schema"
       },
       "response": {
@@ -64,8 +86,7 @@
       "match": {
         "userMessage": "Research group: Homepage headline",
         "systemMessage": "You research facts about one company",
-        "hasToolResult": false,
-        "responseFormat": "json_schema"
+        "hasToolResult": false
       },
       "response": {
         "toolCalls": [
@@ -83,7 +104,19 @@
       "match": {
         "userMessage": "Research group: Homepage headline",
         "systemMessage": "You research facts about one company",
-        "hasToolResult": true,
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"homepage_headline\",\"value\":\"Power AI agents with clean web data\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"# Power AI agents with   clean web data\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "{\"findings\":[{\"field\":\"homepage_headline\",\"value\":\"Power AI agents with clean web data\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"# Power AI agents with   clean web data\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: homepage_headline."
+        ],
         "responseFormat": "json_schema"
       },
       "response": {
@@ -93,8 +126,7 @@
     {
       "match": {
         "userMessage": "Research group: Team size",
-        "systemMessage": "You research facts about one company",
-        "responseFormat": "json_schema"
+        "systemMessage": "You research facts about one company"
       },
       "response": {
         "content": "The team is about fifty people, but this is not the JSON you asked for."
@@ -102,8 +134,33 @@
     },
     {
       "match": {
+        "userMessage": "The team is about fifty people",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: employee_count."
+        ],
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"employees\":\"about fifty\"}"
+      }
+    },
+    {
+      "match": {
         "userMessage": "Research group: Funding stage",
-        "systemMessage": "You research facts about one company",
+        "systemMessage": "You research facts about one company"
+      },
+      "response": {
+        "content": "{\"findings\":[],\"notes\":\"The research result did not match the expected format, so no findings were kept.\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "{\"findings\":[],\"notes\":\"The research result did not match the expected format, so no findings were kept.\"}",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: funding_stage."
+        ],
         "responseFormat": "json_schema"
       },
       "response": {
@@ -114,8 +171,7 @@
       "match": {
         "userMessage": "Research group: Careers page",
         "systemMessage": "You research facts about one company",
-        "hasToolResult": false,
-        "responseFormat": "json_schema"
+        "hasToolResult": false
       },
       "response": {
         "toolCalls": [
@@ -131,7 +187,19 @@
       "match": {
         "userMessage": "Research group: Careers page",
         "systemMessage": "You research facts about one company",
-        "hasToolResult": true,
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"open_roles\",\"value\":\"Founding Engineer\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/careers\",\"quote\":\"We are hiring a Founding Engineer.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "{\"findings\":[{\"field\":\"open_roles\",\"value\":\"Founding Engineer\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/careers\",\"quote\":\"We are hiring a Founding Engineer.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: open_roles."
+        ],
         "responseFormat": "json_schema"
       },
       "response": {

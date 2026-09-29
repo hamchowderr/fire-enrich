@@ -1,0 +1,465 @@
+{
+  "about": [
+    "Live runs of the enrichRow workflow for the structured-output bead, 2026-09-28/29, from branch fix/fe-cj9-structured-output, with tests/evidence/enrich-structured-output.live.test.ts (ENRICH_LIVE=1). Research model anthropic/claude-sonnet-4.5 on the AI Gateway; EVIDENCE_CHECK=0, TRACING=0, a temp libSQL file, no Dolt.",
+    "Owner-approved budget: 230 model calls and 100 Firecrawl calls in total. Used: 135 model calls (probe 8; one aborted full attempt 1, the planner call, before it stopped on a plan with an agent group; full run 126) and 100 Firecrawl calls (probe 4, full run 96). The full run reached its Firecrawl cap of 96 on its last row: one scrape was refused, not made, and that row still filled all four fields.",
+    "probe: one row, one search group whose research loop was cut from 10 to 3 steps, so its last step went out with toolChoice none (no tools sent) after tool calls. The provider accepted it (finish reason stop / end_turn) and the group returned its finding.",
+    "full: the 8 rows and 4 fields of the earlier run. The planner (generic profile) planned company-basics as search and revenue-model as agent; the harness ran every group as a search group, because it counts no browser sessions and the hosted Firecrawl agent is billed per job. Rows ran one at a time.",
+    "Before (tests/evidence/heldout-results.json, 2026-09-26, main, same rows and fields): 12 of 16 groups with structuredOutputFailed, 10 of 32 fields filled."
+  ],
+  "before": {
+    "groups": 16,
+    "groupsWithStructuredOutputFailure": 12,
+    "fieldsFilled": "10/32"
+  },
+  "probe": {
+    "run": "probe",
+    "date": "2026-09-29",
+    "researchModel": "anthropic/claude-sonnet-4.5",
+    "planSource": "probe",
+    "plan": [
+      {
+        "id": "industry",
+        "strategy": "search",
+        "fieldNames": [
+          "industry"
+        ]
+      }
+    ],
+    "wallSeconds": 52,
+    "caps": {
+      "model": 20,
+      "firecrawl": 15
+    },
+    "calls": {
+      "model": 8,
+      "firecrawl": 4
+    },
+    "capHit": null,
+    "rows": [
+      {
+        "email": "hello@firecrawl.dev",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "industry"
+        ]
+      }
+    ],
+    "groups": [
+      {
+        "email": "hello@firecrawl.dev",
+        "groupId": "industry",
+        "strategy": "search",
+        "fieldNames": [
+          "industry"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      }
+    ],
+    "groupsWithStructuredOutputFailure": 0,
+    "fieldsFilled": "1/1",
+    "industryFilled": "1/1",
+    "callsThatHitTheLastStep": [
+      "hello@firecrawl.dev / Industry"
+    ],
+    "validationFailures": [],
+    "structuringErrors": [],
+    "modelRequests": [
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 2,
+        "toolChoice": "auto",
+        "toolHistory": false,
+        "finishReason": "{\"unified\":\"tool-calls\",\"raw\":\"tool_use\"}"
+      },
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 2,
+        "toolChoice": "auto",
+        "toolHistory": true,
+        "finishReason": "{\"unified\":\"tool-calls\",\"raw\":\"tool_use\"}"
+      },
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 2,
+        "toolChoice": "auto",
+        "toolHistory": true,
+        "finishReason": "{\"unified\":\"stop\",\"raw\":\"end_turn\"}"
+      },
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 0,
+        "toolHistory": false,
+        "responseFormat": "json",
+        "finishReason": "{\"unified\":\"stop\",\"raw\":\"end_turn\"}"
+      },
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 3,
+        "toolChoice": "auto",
+        "toolHistory": false,
+        "finishReason": "{\"unified\":\"tool-calls\",\"raw\":\"tool_use\"}"
+      },
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 3,
+        "toolChoice": "auto",
+        "toolHistory": true,
+        "finishReason": "{\"unified\":\"tool-calls\",\"raw\":\"tool_use\"}"
+      },
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 0,
+        "toolChoice": "none",
+        "toolHistory": true,
+        "finishReason": "{\"unified\":\"stop\",\"raw\":\"end_turn\"}"
+      },
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 0,
+        "toolHistory": false,
+        "responseFormat": "json",
+        "finishReason": "{\"unified\":\"stop\",\"raw\":\"end_turn\"}"
+      }
+    ]
+  },
+  "full": {
+    "run": "full",
+    "date": "2026-09-29",
+    "researchModel": "anthropic/claude-sonnet-4.5",
+    "planSource": "planner",
+    "plannedStrategies": [
+      "company-basics: search",
+      "revenue-model: agent"
+    ],
+    "plan": [
+      {
+        "id": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ]
+      },
+      {
+        "id": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ]
+      }
+    ],
+    "wallSeconds": 613,
+    "caps": {
+      "model": 221,
+      "firecrawl": 96
+    },
+    "calls": {
+      "model": 126,
+      "firecrawl": 96
+    },
+    "capHit": "Firecrawl cap of 96 reached (scrape)",
+    "rows": [
+      {
+        "email": "hello@firecrawl.dev",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "companyName",
+          "companyDescription",
+          "industry",
+          "businessModel"
+        ]
+      },
+      {
+        "email": "support@supabase.com",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "companyName",
+          "companyDescription",
+          "industry",
+          "businessModel"
+        ]
+      },
+      {
+        "email": "hi@mintlify.com",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "companyName",
+          "companyDescription",
+          "industry",
+          "businessModel"
+        ]
+      },
+      {
+        "email": "support@langchain.dev",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "companyName",
+          "companyDescription",
+          "industry",
+          "businessModel"
+        ]
+      },
+      {
+        "email": "hello@convex.dev",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "companyName",
+          "companyDescription",
+          "industry",
+          "businessModel"
+        ]
+      },
+      {
+        "email": "support@hex.tech",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "companyName",
+          "companyDescription",
+          "industry",
+          "businessModel"
+        ]
+      },
+      {
+        "email": "hello@vanta.com",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "companyName",
+          "companyDescription",
+          "industry",
+          "businessModel"
+        ]
+      },
+      {
+        "email": "support@brex.com",
+        "status": "success",
+        "companyIdentified": true,
+        "filled": [
+          "companyName",
+          "companyDescription",
+          "industry",
+          "businessModel"
+        ]
+      }
+    ],
+    "groups": [
+      {
+        "email": "hello@firecrawl.dev",
+        "groupId": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ],
+        "found": 3,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "hello@firecrawl.dev",
+        "groupId": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "support@supabase.com",
+        "groupId": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ],
+        "found": 3,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "support@supabase.com",
+        "groupId": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "hi@mintlify.com",
+        "groupId": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ],
+        "found": 3,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "hi@mintlify.com",
+        "groupId": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "support@langchain.dev",
+        "groupId": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ],
+        "found": 3,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "support@langchain.dev",
+        "groupId": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "hello@convex.dev",
+        "groupId": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ],
+        "found": 3,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "hello@convex.dev",
+        "groupId": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "support@hex.tech",
+        "groupId": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ],
+        "found": 3,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "support@hex.tech",
+        "groupId": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "hello@vanta.com",
+        "groupId": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ],
+        "found": 3,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "hello@vanta.com",
+        "groupId": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "support@brex.com",
+        "groupId": "company-basics",
+        "strategy": "search",
+        "fieldNames": [
+          "companyName",
+          "companyDescription",
+          "industry"
+        ],
+        "found": 3,
+        "structuredOutputFailed": false
+      },
+      {
+        "email": "support@brex.com",
+        "groupId": "revenue-model",
+        "strategy": "search",
+        "fieldNames": [
+          "businessModel"
+        ],
+        "found": 1,
+        "structuredOutputFailed": false
+      }
+    ],
+    "groupsWithStructuredOutputFailure": 0,
+    "fieldsFilled": "32/32",
+    "industryFilled": "8/8",
+    "callsThatHitTheLastStep": [
+      "support@langchain.dev / identify"
+    ],
+    "validationFailures": [],
+    "structuringErrors": [],
+    "modelRequestsByRole": {
+      "planner structuring": 1,
+      "research": 101,
+      "research structuring": 24
+    },
+    "modelRequestsWithToolChoiceNone": [
+      {
+        "role": "research",
+        "modelId": "anthropic/claude-sonnet-4.5",
+        "tools": 0,
+        "toolChoice": "none",
+        "toolHistory": true,
+        "finishReason": "{\"unified\":\"stop\",\"raw\":\"end_turn\"}"
+      }
+    ],
+    "modelRequestErrors": 0
+  }
+}

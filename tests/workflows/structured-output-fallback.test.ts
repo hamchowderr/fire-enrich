@@ -1,13 +1,14 @@
 /**
- * How the research step tells a structured-output fallback apart from a real
- * answer. With `errorStrategy: 'fallback'` Mastra substitutes the configured
- * `NO_FINDINGS` value and sets `usedFallbackValue`; the step must read that
- * flag, not the note the fallback value carries.
+ * How the research step tells a failed structured output apart from a real
+ * answer. With `errorStrategy: 'warn'` Mastra logs the validation error and
+ * leaves `stream.object` undefined; the step substitutes `NO_FINDINGS` and
+ * reports the failure from the parse, not from the note that value carries.
  *
  * One `enrichRow` run with three groups, every model call answered by AIMock
  * (`fixtures/research-group.json`):
  * - "Product and positioning" returns a valid answer with a finding.
- * - "Team size" returns text that is not JSON, so Mastra falls back.
+ * - "Team size" returns text that is not JSON, and so does its structuring
+ *   call, so the output fails validation.
  * - "Funding stage" returns a valid answer whose notes are, word for word, the
  *   note the fallback value carries.
  *
@@ -87,6 +88,8 @@ type Chunk = { type: string; payload?: { output?: Record<string, unknown> } };
 
 let chunks: Chunk[];
 let output: ReturnType<typeof EnrichRowOutput.parse>;
+/** What was logged through `console.warn` during the run. */
+let warnings: string[];
 
 beforeAll(async () => {
   const health = await fetch(`${AIMOCK_URL}/health`).catch(() => undefined);
@@ -109,6 +112,7 @@ beforeAll(async () => {
   const result = await stream.result;
   if (result.status !== 'success') throw new Error(`workflow ${result.status}: ${JSON.stringify(result)}`);
   output = EnrichRowOutput.parse(result.result);
+  warnings = vi.mocked(console.warn).mock.calls.map((args) => args.map(String).join(' '));
 }, 120_000);
 
 afterAll(() => {
@@ -131,7 +135,8 @@ describe('structured-output fallback detection', () => {
     expect(output.enrichments.product_summary?.value).toBe('The web data API to search, scrape, and interact at scale.');
   });
 
-  it('reports the fallback as a failure and keeps its note for the user', () => {
+  it('reports a failed structured output as a failure, logs why, and keeps its note for the user', () => {
+    expect(warnings).toContainEqual(expect.stringContaining('Structured output validation failed'));
     expect(groupResult('team')).toMatchObject({ structuredOutputFailed: true, found: 0 });
     expect(groupResult('team')?.notes).toContain(FALLBACK_NOTE);
     expect(completeEvent('team')).toMatchObject({ structuredOutputFailed: true });

@@ -1,0 +1,149 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "userMessage": "Research group: Preamble once",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "I'll search for Firecrawl's product first.",
+        "toolCalls": [
+          {
+            "id": "call_preamble_once_search",
+            "name": "search",
+            "arguments": {
+              "query": "Firecrawl product"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Preamble once",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"product_summary\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "{\"findings\":[{\"field\":\"product_summary\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: product_summary."
+        ],
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"product_summary\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.9}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Preamble every step",
+        "systemMessage": "You research facts about one company",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Let me search for the funding stage.",
+        "toolCalls": [
+          {
+            "id": "call_preamble_every_search",
+            "name": "search",
+            "arguments": {
+              "query": "Firecrawl funding"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Preamble every step",
+        "systemMessage": "You research facts about one company",
+        "toolCallId": "call_preamble_every_search"
+      },
+      "response": {
+        "content": "The search results point at the homepage. I'll read it to confirm.",
+        "toolCalls": [
+          {
+            "id": "call_preamble_every_scrape",
+            "name": "scrape",
+            "arguments": {
+              "url": "https://www.firecrawl.dev/"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Preamble every step",
+        "systemMessage": "You research facts about one company",
+        "toolCallId": "call_preamble_every_scrape"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"tagline\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "{\"findings\":[{\"field\":\"tagline\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: tagline."
+        ],
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"tagline\",\"value\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.8}],\"sourcesAgree\":true}],\"notes\":\"\"}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Out of steps",
+        "systemMessage": [
+          "You research facts about one company",
+          "You have no tool calls left."
+        ]
+      },
+      "response": {
+        "content": "The searches kept returning the Firecrawl homepage, whose headline is Power AI agents with clean web data."
+      }
+    },
+    {
+      "match": {
+        "userMessage": "Research group: Out of steps",
+        "systemMessage": "You research facts about one company"
+      },
+      "response": {
+        "content": "Searching again.",
+        "toolCalls": [
+          {
+            "name": "search",
+            "arguments": {
+              "query": "Firecrawl headline out of steps"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "userMessage": "The searches kept returning the Firecrawl homepage",
+        "systemMessage": [
+          "You turn a research transcript",
+          "Fields: homepage_headline."
+        ],
+        "responseFormat": "json_schema"
+      },
+      "response": {
+        "content": "{\"findings\":[{\"field\":\"homepage_headline\",\"value\":\"Power AI agents with clean web data\",\"confidence\":0.7,\"evidence\":[{\"url\":\"https://www.firecrawl.dev/\",\"quote\":\"# Power AI agents with   clean web data\",\"confidence\":0.7}],\"sourcesAgree\":true}],\"notes\":\"The search budget ran out before a final answer.\"}"
+      }
+    }
+  ]
+}

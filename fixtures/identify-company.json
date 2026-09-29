@@ -4,8 +4,7 @@
       "match": {
         "userMessage": "Email to identify: hello@firecrawl.dev",
         "systemMessage": "You identify the company",
-        "hasToolResult": false,
-        "responseFormat": "json_schema"
+        "hasToolResult": false
       },
       "response": {
         "toolCalls": [
@@ -23,7 +22,19 @@
       "match": {
         "userMessage": "Email to identify: hello@firecrawl.dev",
         "systemMessage": "You identify the company",
-        "hasToolResult": true,
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.95}"
+      }
+    },
+    {
+      "match": {
+        "userMessage": "{\"companyName\":\"Firecrawl\",\"domain\":\"firecrawl.dev\",\"website\":\"https://www.firecrawl.dev/\",\"description\":\"The web data API to search, scrape, and interact at scale.\",\"confidence\":0.95}",
+        "systemMessage": [
+          "You turn a research transcript",
+          "The email domain is firecrawl.dev."
+        ],
         "responseFormat": "json_schema"
       },
       "response": {
