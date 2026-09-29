@@ -19,7 +19,8 @@
  * - `probe`: one row and one search group whose loop is cut to 3 steps, so the
  *   last step goes out with `toolChoice: 'none'` after tool calls. It records
  *   what each model request carried and whether the provider accepted it.
- * - `full`: 8 rows, 4 fields, a plan from the planner (generic profile).
+ * - `full`: 8 rows, 4 fields, a plan from the planner (generic profile), with
+ *   every group run as a search group (the planner's strategies are recorded).
  *
  * Both caps are required and must be positive whole numbers.
  * `ENRICH_LIVE_OUT` is the JSON file the results are written to.
@@ -315,19 +316,25 @@ describe.skipIf(!live)('enrichRow structured output (live gateway and Firecrawl)
 
     let plan: ResearchPlanType;
     let planSource = 'probe';
+    let plannedStrategies: string[] = [];
     let emails: string[];
     if (runName === 'probe') {
       plan = PROBE_PLAN;
       emails = [ROWS[0]];
     } else {
       const resolved = await resolvePlan(FIELDS, { planner: mastra.getAgent('planner') });
-      plan = resolved.plan;
       planSource = resolved.source;
+      plannedStrategies = resolved.plan.groups.map((group) => `${group.id}: ${group.strategy}`);
+      // Browser sessions are not counted by this harness, and the hosted
+      // Firecrawl agent is billed per job and polled many times; run every
+      // group as a search group so the caps hold. The planner's strategies are
+      // recorded in the report.
+      plan = {
+        ...resolved.plan,
+        fields: resolved.plan.fields.map((field) => ({ ...field, strategy: 'search' as const })),
+        groups: resolved.plan.groups.map((group) => ({ ...group, strategy: 'search' as const })),
+      };
       emails = ROWS;
-      const strategies = new Set(plan.groups.map((group) => group.strategy));
-      // Browser sessions are not counted by this harness, and the hosted agent
-      // is billed per job; stop before any row if the plan asks for either.
-      expect([...strategies], 'the plan must use search groups only').toEqual(['search']);
     }
 
     const rows = [];
@@ -356,6 +363,7 @@ describe.skipIf(!live)('enrichRow structured output (live gateway and Firecrawl)
       date: new Date().toISOString().slice(0, 10),
       researchModel: 'anthropic/claude-sonnet-4.5',
       planSource,
+      plannedStrategies,
       plan: plan.groups.map((group) => ({ id: group.id, strategy: group.strategy, fieldNames: group.fieldNames })),
       wallSeconds: Math.round((Date.now() - started) / 1000),
       caps: { model: counters.maxModel, firecrawl: counters.maxFirecrawl },
