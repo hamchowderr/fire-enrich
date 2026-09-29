@@ -9,8 +9,6 @@
   },
   "unused_files": [],
   "unused_exports": [
-    "app/fire-enrich/config.ts:FIRE_ENRICH_CONFIG",
-    "app/fire-enrich/config.ts:ERROR_MESSAGES",
     "components/shared/layout/curvy-rect.tsx:ConnectorToRight",
     "components/shared/layout/curvy-rect.tsx:ConnectorToLeft",
     "components/shared/layout/curvy-rect.tsx:ConnectorToTop",
