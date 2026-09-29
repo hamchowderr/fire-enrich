@@ -198,14 +198,27 @@ ends them with `…[truncated]`; `maskEmails` masks the last word before that ma
 be an address the cut split. Mastra ships no value-pattern span processor:
 `SensitiveDataFilter` matches key names only, and `RegexFilterProcessor` / `PIIDetector` are
 agent processors that change what the model sees.
-Other personal data in a row is stored as is, and Mastra's workflow snapshots
-(`mastra_workflow_snapshot`) hold each row's input, email included, unmasked and unpruned (follow-up bead fe-w8a).
+Other personal data in a row is stored as is.
 
 Retention: `TRACING_RETENTION_DAYS` (default 14, `0` = forever) sets the LibSQLStore's
 `retention.observability.spans.maxAge`. `pruneTraces` (`lib/flush-traces.ts`) calls
 `storage.prune({ maxRows: 5000 })` at most once an hour per instance, after the flush in
 `after()`. That path was chosen over a Vercel cron route because it needs no `CRON_SECRET`
 or scheduler, so a one-click deploy prunes too; overlapping prunes are harmless.
+
+Workflow snapshots: Mastra writes a `mastra_workflow_snapshot` row per `enrichRow` run,
+tracing on or off, with the run's input (email included) and step results, unmasked.
+`storageRetention` (`lib/mastra/retention.ts`) adds LibSQLStore's
+`retention.workflows.workflowSnapshot.maxAge` from `WORKFLOW_SNAPSHOT_RETENTION_DAYS`
+(default 14, `0` = forever), a variable of its own so keeping traces forever does not keep
+snapshots forever. The same `pruneTraces` call applies it. LibSQLStore anchors it on
+`updatedAt` (last activity), so a run still going survives. Nothing reads a finished run's
+snapshot: `enrichRow` never suspends or resumes, and Dolt recording uses the workflow result.
+Studio's workflow run list reads the table, so pruned runs leave it. Snapshots are still
+persisted (not `shouldPersistSnapshot: () => false`) so Studio can show recent and live runs
+and a later suspend step would keep working. The table is Mastra's own, created at store init,
+so this adds no migration. `tests/unit/retention.test.ts` runs a real workflow on a libSQL file
+and prunes it.
 
 `checkEvidenceSupport` records one `evidence-support: <field>` child span of the research
 step per finding it checks, with `field`, `probability`, `threshold` and `decision` (`kept`,

@@ -9,18 +9,20 @@ import { mastra } from '@/lib/mastra';
 const PRUNE_INTERVAL_MS = 60 * 60_000;
 
 /**
- * Most spans one prune deletes. A row writes a few dozen spans, so this clears
- * well over a hundred expired rows per prune; what is left waits for the next.
+ * Most rows one prune deletes from each table. A row writes a few dozen spans
+ * and one workflow snapshot, so this clears well over a hundred expired rows'
+ * spans per prune; what is left waits for the next.
  */
 const PRUNE_MAX_ROWS = 5_000;
 
 const pruneState = globalThis as typeof globalThis & { __fireEnrichLastPrune?: number };
 
 /**
- * Delete trace spans older than `TRACING_RETENTION_DAYS` (the store's
- * `retention`, `lib/mastra/tracing.ts`), at most once per
+ * Delete trace spans older than `TRACING_RETENTION_DAYS` and workflow run
+ * snapshots older than `WORKFLOW_SNAPSHOT_RETENTION_DAYS` (the store's
+ * `retention`, `lib/mastra/retention.ts`), at most once per
  * {@link PRUNE_INTERVAL_MS} per server instance and at most
- * {@link PRUNE_MAX_ROWS} spans at a time. A no-op when retention is 0 (no
+ * {@link PRUNE_MAX_ROWS} rows per table at a time. A no-op when both are 0 (no
  * policy is configured, so `prune()` returns at once).
  *
  * Run from `after()` rather than a Vercel cron route so that every deployment
@@ -37,8 +39,10 @@ export async function pruneTraces(now = Date.now()): Promise<void> {
 
   try {
     const results = (await mastra.getStorage()?.prune({ maxRows: PRUNE_MAX_ROWS })) ?? [];
-    const deleted = results.reduce((sum, result) => sum + result.deleted, 0);
-    if (deleted > 0) console.log(`[TRACING] pruned ${deleted} expired span(s)`);
+    const deleted = results.filter((result) => result.deleted > 0);
+    if (deleted.length > 0) {
+      console.log(`[TRACING] pruned ${deleted.map((result) => `${result.deleted} from ${result.table}`).join(', ')}`);
+    }
   } catch (error) {
     console.warn('[TRACING] prune failed:', error instanceof Error ? error.message : error);
   }

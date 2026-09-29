@@ -83,10 +83,20 @@ describe('pruneTraces', () => {
     expect(prune).toHaveBeenCalledTimes(2);
   });
 
-  it('logs how many spans it deleted', async () => {
+  it('logs how many rows it deleted from each table', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    prune.mockResolvedValue([{ domain: 'observability', table: 'mastra_ai_spans', deleted: 42, done: false }]);
+    prune.mockResolvedValue([
+      { domain: 'observability', table: 'mastra_ai_spans', deleted: 42, done: false },
+      { domain: 'workflows', table: 'mastra_workflow_snapshot', deleted: 3, done: true },
+      { domain: 'memory', table: 'mastra_messages', deleted: 0, done: true },
+    ]);
     await pruneTraces();
-    expect(log).toHaveBeenCalledWith('[TRACING] pruned 42 expired span(s)');
+    expect(log).toHaveBeenCalledWith('[TRACING] pruned 42 from mastra_ai_spans, 3 from mastra_workflow_snapshot');
+  });
+
+  it('logs nothing when nothing expired', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await pruneTraces();
+    expect(log).not.toHaveBeenCalled();
   });
 });
