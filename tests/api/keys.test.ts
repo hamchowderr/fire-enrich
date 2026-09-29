@@ -481,4 +481,30 @@ describe('app source', () => {
       .map((file) => path.relative(appDir, file));
     expect(offenders).toEqual([]);
   });
+
+  it('asks for no Firecrawl key and sends no key header', () => {
+    const appDir = fileURLToPath(new URL('../../app', import.meta.url));
+    const files = sourceFiles(appDir);
+    expect(files.length).toBeGreaterThan(0);
+
+    // The browser storage key and the input the upstream dialog used for a
+    // Firecrawl key the server never reads (case-sensitive, so the
+    // FIRECRAWL_API_KEY status field still passes), and any key header.
+    const offenders = files
+      .filter((file) => {
+        const source = readFileSync(file, 'utf8');
+        return /firecrawl_api_key|firecrawl-key/.test(source) || /x-[\w-]*api-key/i.test(source);
+      })
+      .map((file) => path.relative(appDir, file));
+    expect(offenders).toEqual([]);
+  });
+
+  it.each(['page.tsx', 'fire-enrich/page.tsx'])(
+    '%s names FIRECRAWL_API_KEY as server configuration',
+    (page) => {
+      const source = readFileSync(fileURLToPath(new URL(`../../app/${page}`, import.meta.url)), 'utf8');
+      expect(source).toMatch(/Set\s+FIRECRAWL_API_KEY in the server&apos;s environment/);
+      expect(source).not.toMatch(/<Input\b/);
+    },
+  );
 });
