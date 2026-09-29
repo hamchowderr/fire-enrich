@@ -98,8 +98,6 @@ These are read by the code but not set by hand.
 | `VERCEL_OIDC_TOKEN` | `vercel env pull` | Authenticates the AI Gateway in local development, in place of `AI_GATEWAY_API_KEY`. |
 | `NODE_ENV` | Next.js | Build mode. |
 
-`FIRE_ENRICH_UNLIMITED` is set in `.env.example` and read by `app/fire-enrich/config.ts`, but no code applies the limits in that file, so it has no effect.
-
 ### Tests only
 
 Set by `tests/setup.ts`, the npm scripts or CI. A real run never needs them.
