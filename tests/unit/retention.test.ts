@@ -7,12 +7,14 @@
 import path from 'node:path';
 
 import { Mastra } from '@mastra/core';
+import type { RetentionConfig } from '@mastra/core/storage';
 import { SpanType } from '@mastra/core/observability';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { LibSQLStore } from '@mastra/libsql';
 import { describe, expect, inject, it } from 'vitest';
 import { z } from 'zod';
 
+import { mastra } from '@/lib/mastra';
 import { snapshotRetentionDays, storageRetention } from '@/lib/mastra/retention';
 
 const TRACING = { enabled: true, sampleRate: 1, retentionDays: 14 };
@@ -50,6 +52,17 @@ describe('storageRetention', () => {
     expect(storageRetention({ ...TRACING, enabled: false }, 14)).toMatchObject({
       workflows: { workflowSnapshot: { maxAge: '14d' } },
     });
+  });
+});
+
+describe("the app's Mastra store", () => {
+  it('is built with storageRetention, so prune() expires snapshots as well as spans', () => {
+    // `retention` is a protected field of MastraCompositeStore; read it to
+    // catch the store being built with the span policy alone.
+    const store = mastra.getStorage() as unknown as { retention?: RetentionConfig };
+    expect(process.env.WORKFLOW_SNAPSHOT_RETENTION_DAYS).toBeUndefined();
+    expect(store.retention?.workflows?.workflowSnapshot?.maxAge).toBe('14d');
+    expect(store.retention).toEqual(storageRetention({ ...TRACING, enabled: false }, 14));
   });
 });
 
