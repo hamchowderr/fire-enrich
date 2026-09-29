@@ -118,18 +118,10 @@ export function EnrichmentTable({
     setStatus("processing");
 
     try {
-      // Get API keys from localStorage if not in environment
-      const firecrawlApiKey = localStorage.getItem("firecrawl_api_key");
-
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...(useAgents && { "x-use-agents": "true" }),
       };
-
-      // Add API keys to headers if available
-      if (firecrawlApiKey) {
-        headers["X-Firecrawl-API-Key"] = firecrawlApiKey;
-      }
 
       const response = await fetch("/api/enrich", {
         method: "POST",
@@ -552,14 +544,6 @@ export function EnrichmentTable({
     ]);
 
     try {
-      const firecrawlApiKey = localStorage.getItem("firecrawl_api_key");
-
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-
-      if (firecrawlApiKey) headers["X-Firecrawl-API-Key"] = firecrawlApiKey;
-
       // Get conversation history (last 10 messages)
       const conversationHistory = agentMessages
         .filter(msg => msg.type === 'user' || msg.type === 'assistant')
@@ -597,7 +581,7 @@ export function EnrichmentTable({
 
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: message,
           context: {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 //Enrich Specific Components
@@ -28,8 +28,7 @@ import HeaderWrapper from "@/components/shared/header/Wrapper/Wrapper";
 import HeaderDropdownWrapper from "@/components/shared/header/Dropdown/Wrapper/Wrapper";
 
 // Ui Imports
-import { toast } from "sonner";
-import { ArrowLeft, ExternalLink, Loader2 } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import Button from "@/components/shared/button/button";
 import {
   Dialog,
@@ -39,7 +38,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import Input from "@/components/ui/input";
 
 export default function HomePage() {
   //enrich-states
@@ -50,65 +48,25 @@ export default function HomePage() {
   } | null>(null);
   const [emailColumn, setEmailColumn] = useState<string>("");
   const [selectedFields, setSelectedFields] = useState<EnrichmentField[]>([]);
-  const [isCheckingEnv, setIsCheckingEnv] = useState(true);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [firecrawlApiKey, setFirecrawlApiKey] = useState<string>("");
-  const [isValidatingApiKey, setIsValidatingApiKey] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
   const [missingKeys, setMissingKeys] = useState<{
     firecrawl: boolean;
     gateway: boolean;
   }>({ firecrawl: false, gateway: false });
-  const [pendingCSVData, setPendingCSVData] = useState<{
-    rows: CSVRow[];
-    columns: string[];
-  } | null>(null);
-
-  //enrich effect function
-  useEffect(() => {
-    const checkEnvironment = async () => {
-      try {
-        const response = await fetch("/api/check-env");
-        if (!response.ok) {
-          throw new Error("Failed to check environment");
-        }
-        const data = await response.json();
-        const hasFirecrawl = data.environmentStatus.FIRECRAWL_API_KEY;
-
-        if (!hasFirecrawl) {
-          // Check localStorage for saved API key
-          const savedKey = localStorage.getItem("firecrawl_api_key");
-          if (savedKey) {
-            setFirecrawlApiKey(savedKey);
-          }
-        }
-      } catch (error) {
-        console.error("Error checking environment:", error);
-      } finally {
-        setIsCheckingEnv(false);
-      }
-    };
-
-    checkEnvironment();
-  }, []);
 
   const handleCSVUpload = async (rows: CSVRow[], columns: string[]) => {
-    // Check if we have Firecrawl API key
+    // Both credentials are server configuration: the routes read
+    // FIRECRAWL_API_KEY and the AI Gateway credential (AI_GATEWAY_API_KEY, or
+    // the deployment's OIDC token on Vercel) from the environment only, so
+    // there is no key to enter here.
     const response = await fetch("/api/check-env");
     const data = await response.json();
     const hasFirecrawl = data.environmentStatus.FIRECRAWL_API_KEY;
-    // The AI Gateway authenticates on the server only (AI_GATEWAY_API_KEY, or
-    // the deployment's OIDC token on Vercel), so there is no key to enter here.
     const hasGateway = data.environmentStatus.AI_GATEWAY_API_KEY;
-    const savedFirecrawlKey = localStorage.getItem("firecrawl_api_key");
 
-    if ((!hasFirecrawl && !savedFirecrawlKey) || !hasGateway) {
-      // Save the CSV data temporarily and show API key modal
-      setPendingCSVData({ rows, columns });
-      setMissingKeys({
-        firecrawl: !hasFirecrawl && !savedFirecrawlKey,
-        gateway: !hasGateway,
-      });
-      setShowApiKeyModal(true);
+    if (!hasFirecrawl || !hasGateway) {
+      setMissingKeys({ firecrawl: !hasFirecrawl, gateway: !hasGateway });
+      setShowConfigModal(true);
     } else {
       setCsvData({ rows, columns });
       setStep("setup");
@@ -134,72 +92,6 @@ export default function HomePage() {
     setCsvData(null);
     setEmailColumn("");
     setSelectedFields([]);
-  };
-
-  const openFirecrawlWebsite = () => {
-    window.open("https://www.firecrawl.dev", "_blank");
-  };
-
-  const handleApiKeySubmit = async () => {
-    // Check environment again to see what's missing
-    const response = await fetch("/api/check-env");
-    const data = await response.json();
-    const hasEnvFirecrawl = data.environmentStatus.FIRECRAWL_API_KEY;
-    const hasGateway = data.environmentStatus.AI_GATEWAY_API_KEY;
-    const hasSavedFirecrawl = localStorage.getItem("firecrawl_api_key");
-
-    const needsFirecrawl = !hasEnvFirecrawl && !hasSavedFirecrawl;
-
-    if (needsFirecrawl && !firecrawlApiKey.trim()) {
-      toast.error("Please enter a valid Firecrawl API key");
-      return;
-    }
-
-    setIsValidatingApiKey(true);
-
-    try {
-      // Test the Firecrawl API key if provided
-      if (firecrawlApiKey) {
-        const response = await fetch("/api/scrape", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Firecrawl-API-Key": firecrawlApiKey,
-          },
-          body: JSON.stringify({ url: "https://example.com" }),
-        });
-
-        if (!response.ok) {
-          throw new Error("Invalid Firecrawl API key");
-        }
-
-        // Save the API key to localStorage
-        localStorage.setItem("firecrawl_api_key", firecrawlApiKey);
-      }
-
-      // Only the server can configure the gateway; stay on the dialog, which
-      // now shows the gateway alone.
-      if (!hasGateway) {
-        setMissingKeys({ firecrawl: false, gateway: true });
-        toast.error("The AI Gateway is not configured on the server.");
-        return;
-      }
-
-      toast.success("API keys saved successfully!");
-      setShowApiKeyModal(false);
-
-      // Process the pending CSV data
-      if (pendingCSVData) {
-        setCsvData(pendingCSVData);
-        setStep("setup");
-        setPendingCSVData(null);
-      }
-    } catch (error) {
-      toast.error("Invalid API key. Please check and try again.");
-      console.error("API key validation error:", error);
-    } finally {
-      setIsValidatingApiKey(false);
-    }
   };
 
   return (
@@ -347,18 +239,9 @@ export default function HomePage() {
                 />
 
                 <div className="p-16 flex flex-col justify-center relative lg:min-w-[700px]">
-                  {isCheckingEnv ? (
-                    <div className="text-center py-10">
-                      <Loader2 style={{ width: '36px', height: '36px', minWidth: '36px', minHeight: '36px' }} className="animate-spin text-primary mx-auto mb-4" />
-                      <p className="text-body-small text-muted-foreground">
-                        Initializing...
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="w-full">
-                      <CSVUploader onUpload={handleCSVUpload} />
-                    </div>
-                  )}
+                  <div className="w-full">
+                    <CSVUploader onUpload={handleCSVUpload} />
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -373,8 +256,8 @@ export default function HomePage() {
           )}
         </section>
       </div>
-      {/*Dialog Input for BYOK*/}
-      <Dialog open={showApiKeyModal} onOpenChange={setShowApiKeyModal}>
+      {/* Server configuration notice */}
+      <Dialog open={showConfigModal} onOpenChange={setShowConfigModal}>
         <DialogContent
           className="sm:max-w-md rounded-md p-16"
           style={{ backgroundColor: "var(--accent-white)" }}
@@ -383,37 +266,31 @@ export default function HomePage() {
             <DialogTitle>Configuration Required</DialogTitle>
             <DialogDescription>
               Enrichment needs a Firecrawl API key and access to the Vercel AI
-              Gateway.
+              Gateway, both configured on the server.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
             {missingKeys.firecrawl && (
               <>
+                <div className="flex flex-col gap-2">
+                  <p className="text-body-small font-medium">Firecrawl</p>
+                  <p className="text-body-small text-black-alpha-64">
+                    Search and scrape calls use the Firecrawl API key
+                    configured on the server, not in this dialog. Set
+                    FIRECRAWL_API_KEY in the server&apos;s environment.
+                  </p>
+                </div>
                 <Button
-                  onClick={openFirecrawlWebsite}
+                  onClick={() =>
+                    window.open("https://www.firecrawl.dev", "_blank")
+                  }
                   variant="secondary"
                   size="default"
                   className="flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <ExternalLink style={{ width: '20px', height: '20px', minWidth: '20px', minHeight: '20px' }} />
-                  Get Firecrawl API Key
+                  Get a Firecrawl API key
                 </Button>
-                <div className="flex flex-col gap-2">
-                  <label
-                    htmlFor="firecrawl-key"
-                    className="text-body-small font-medium"
-                  >
-                    Firecrawl API Key
-                  </label>
-                  <Input
-                    id="firecrawl-key"
-                    type="password"
-                    placeholder="fc-..."
-                    value={firecrawlApiKey}
-                    onChange={(e) => setFirecrawlApiKey(e.target.value)}
-                    disabled={isValidatingApiKey}
-                  />
-                </div>
               </>
             )}
 
@@ -446,27 +323,10 @@ export default function HomePage() {
           <DialogFooter>
             <Button
               variant="secondary"
-              onClick={() => setShowApiKeyModal(false)}
-              disabled={isValidatingApiKey}
+              onClick={() => setShowConfigModal(false)}
             >
-              Cancel
+              Close
             </Button>
-            {missingKeys.firecrawl && (
-              <Button
-                onClick={handleApiKeySubmit}
-                disabled={isValidatingApiKey || !firecrawlApiKey.trim()}
-                variant="primary"
-              >
-                {isValidatingApiKey ? (
-                  <>
-                    <Loader2 style={{ width: '20px', height: '20px', minWidth: '20px', minHeight: '20px' }} className="mr-2 animate-spin" />
-                    Validating...
-                  </>
-                ) : (
-                  "Submit"
-                )}
-              </Button>
-            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

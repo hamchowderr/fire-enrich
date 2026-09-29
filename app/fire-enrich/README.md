@@ -125,12 +125,7 @@ npm run dev
 
 5. Open [http://localhost:3000/fire-enrich](http://localhost:3000/fire-enrich)
 
-### Alternative: Browser-based API Keys
-
-If you prefer not to use environment variables, Fire Enrich supports entering API keys directly in the browser:
-1. Visit the Fire Enrich page
-2. Click "Enter API Keys" when prompted
-3. Keys are stored securely in localStorage
+Both keys are server configuration. The routes read them from the environment only, and the upload dialog names the missing variable instead of asking for a key.
 
 ## Features
 
@@ -229,9 +224,8 @@ If you prefer not to use environment variables, Fire Enrich supports entering AP
 
 ### Common Issues
 
-1. **"No API Keys Found"**
-   - Check environment variables
-   - Try browser-based key entry
+1. **"Configuration Required"**
+   - Set `FIRECRAWL_API_KEY` and the AI Gateway credential in the server's environment
    - Verify key validity
 
 2. **Slow Enrichment**
@@ -251,7 +245,7 @@ If you prefer not to use environment variables, Fire Enrich supports entering AP
 
 ## Privacy & Security
 
-- **Local Storage**: API keys stored client-side only
+- **Server-side Keys**: API keys live in the server's environment and never reach the browser
 - **No Data Retention**: Processed data not stored server-side
 - **Secure Transmission**: HTTPS for all requests
 - **Source Transparency**: All data sources tracked
