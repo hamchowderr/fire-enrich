@@ -63,7 +63,13 @@ const LOCAL_CHAR = String.raw`[\p{L}\p{M}\p{N}._%+\-]`;
 const LABEL_CHAR = String.raw`[\p{L}\p{M}\p{N}]`;
 
 /**
- * An address's local part, `@` (or its URL encoding `%40`), then its domain.
+ * An address's local part: the run of local-part characters before `@` (or its
+ * URL encoding `%40`) and a domain. The match is the local part only; the `@`
+ * and the domain are a lookahead and are never consumed, so the domain's
+ * characters can start the next match. Two addresses written together,
+ * `bob@acme.comjane@corp.com`, have no boundary between the first domain and
+ * the second local part: both runs before an `@` are masked in one pass
+ * (`***@***@corp.com`), which takes the first domain's end with it.
  *
  * - Unicode (`u` flag): `josé@acme.com` and `jürgen@bücher.de` match. An
  *   apostrophe (`'` or `’`) counts when it sits between two local-part
@@ -78,8 +84,8 @@ const LABEL_CHAR = String.raw`[\p{L}\p{M}\p{N}]`;
  * - The local part never contains `*`, so a masked address does not match again.
  */
 const EMAIL = new RegExp(
-  String.raw`(?<!${LOCAL_CHAR}|${LOCAL_CHAR}['’])(?:${LOCAL_CHAR}|(?<=${LOCAL_CHAR})['’](?=${LOCAL_CHAR}))+(@|%40)` +
-    String.raw`((?:${LABEL_CHAR}(?:[\p{L}\p{M}\p{N}\-]{0,61}${LABEL_CHAR})?\.){1,127}\p{L}{2,63})`,
+  String.raw`(?<!${LOCAL_CHAR}|${LOCAL_CHAR}['’])(?:${LOCAL_CHAR}|(?<=${LOCAL_CHAR})['’](?=${LOCAL_CHAR}))+` +
+    String.raw`(?=(?:@|%40)(?:${LABEL_CHAR}(?:[\p{L}\p{M}\p{N}\-]{0,61}${LABEL_CHAR})?\.){1,127}\p{L}{2,63})`,
   'gu'
 );
 
@@ -127,7 +133,7 @@ function maskCutTail(text: string): string {
  * @public Tests check the pattern with it.
  */
 export function maskEmails(text: string): string {
-  const masked = text.includes('@') || text.includes('%40') ? text.replace(EMAIL, '***$1$2') : text;
+  const masked = text.includes('@') || text.includes('%40') ? text.replace(EMAIL, '***') : text;
   return maskCutTail(masked);
 }
 

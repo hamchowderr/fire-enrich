@@ -63,6 +63,9 @@ describe('maskEmails', () => {
     ["it's jane@acme.com", "it's ***@acme.com"],
     [`${'x'.repeat(70)}@acme.com`, '***@acme.com'],
     ['a.b@c.d.example.org, e@f.io', '***@c.d.example.org, ***@f.io'],
+    // No boundary between the first domain and the second local part.
+    ['bob@acme.comjane@corp.com', '***@***@corp.com'],
+    ['bob@acme.com%40jane@corp.com', '***@***@corp.com'],
   ])('masks %j whole', (text, masked) => {
     expect(maskEmails(text)).toBe(masked);
     expect(maskEmails(masked)).toBe(masked);
@@ -100,6 +103,7 @@ describe('maskEmails', () => {
       `${'é'.repeat(15_999)}@`,
       `x@${`${'b'.repeat(63)}.`.repeat(249)}`,
       'a@'.repeat(8_000),
+      'b@a.cc'.repeat(2_666),
       `${'a'.repeat(15_988)}…[truncated]`,
     ];
     maskEmails('warm up jane@acme.com');
@@ -152,7 +156,7 @@ describe('emailRedactor and pageTextLimiter on exported spans', () => {
     await observability.shutdown();
   });
 
-  it('mask an address that the string length cap cut in two', async () => {
+  it('masks an address that the string length cap cut in two', async () => {
     const exporter = new CaptureExporter();
     const observability = new Observability({
       configs: {
