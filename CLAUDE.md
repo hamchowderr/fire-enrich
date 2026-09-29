@@ -184,12 +184,20 @@ traces. Per-chunk model spans (`MODEL_CHUNK`) are excluded to limit storage; the
 so no span loses its parent.
 
 Spans store prompts, tool results and the workflow's input and output, so two span output
-processors (`lib/mastra/span-processors.ts`) run before storage: `emailRedactor` masks every
-email address to `***@domain` in input, output, metadata, attributes, error info and request
+processors (`lib/mastra/span-processors.ts`) run before storage: `emailRedactor` masks email
+addresses to `***@domain` in input, output, metadata, attributes, error info and request
 context (strings and object keys), and `pageTextLimiter` cuts strings under a `markdown` key
 (Firecrawl page text) to 2,000 characters. `serializationOptions.maxStringLength` caps any
 other string at 16,000. Mastra's default `SensitiveDataFilter` also runs. Both processors are
 idempotent, because Mastra runs processors on every export of a span (start, update, end).
+The email pattern is Unicode (`u` flag), counts inner apostrophes, and starts a match only
+where a run of local-part characters starts, so it runs in linear time (a 16,000-character
+worst case takes about 1 ms; an unanchored pattern took 300-750 ms, synchronously in
+`span.end`). Mastra cuts long strings when the span records them, before any processor, and
+ends them with `…[truncated]`; `maskEmails` masks the last word before that marker, which may
+be an address the cut split. Mastra ships no value-pattern span processor:
+`SensitiveDataFilter` matches key names only, and `RegexFilterProcessor` / `PIIDetector` are
+agent processors that change what the model sees.
 Other personal data in a row is stored as is.
 
 Retention: `TRACING_RETENTION_DAYS` (default 14, `0` = forever) sets the LibSQLStore's
@@ -230,7 +238,8 @@ each route registers the flush (`tests/trace-flush.ts`).
 Viewing: local, `npm run studio`. Production: a separate env file (e.g.
 `.env.traces.local`) with the production `TURSO_*` values and `TRACING=0`, then
 `npx mastra dev --dir lib/mastra --env .env.traces.local` (with `--env` Studio reads only
-that file). Never put production values in `.env.local`.
+that file, if it exists; a missing file silently falls back to `.env`, `.env.local` and
+`.env.development`, so check the path first). Never put production values in `.env.local`.
 
 ## Conventions & Patterns
 
