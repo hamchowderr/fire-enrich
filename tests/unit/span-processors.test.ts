@@ -52,6 +52,65 @@ describe('maskEmails', () => {
     expect(maskEmails(once)).toBe(once);
     expect(maskEmails('no address @ here, or foo@bar')).toBe('no address @ here, or foo@bar');
   });
+
+  it.each([
+    ['josé@acme.com', '***@acme.com'],
+    ['jürgen@bücher.de', '***@bücher.de'],
+    ['Zoë Ñúñez <zoë.ñúñez@acme.com>', 'Zoë Ñúñez <***@acme.com>'],
+    ["o'brien@acme.com", '***@acme.com'],
+    ['o’brien@acme.com', '***@acme.com'],
+    ["email='jane@acme.io'", "email='***@acme.io'"],
+    ["it's jane@acme.com", "it's ***@acme.com"],
+    [`${'x'.repeat(70)}@acme.com`, '***@acme.com'],
+    ['a.b@c.d.example.org, e@f.io', '***@c.d.example.org, ***@f.io'],
+  ])('masks %j whole', (text, masked) => {
+    expect(maskEmails(text)).toBe(masked);
+    expect(maskEmails(masked)).toBe(masked);
+  });
+
+  it.each([
+    // Cut before the `@`: the last word is masked, since it may be a local part.
+    ['Contact: jane.do…[truncated]', 'Contact: ***…[truncated]'],
+    ['Contact: jane%4…[truncated]', 'Contact: ***…[truncated]'],
+    // Cut inside the domain, which the full pattern does not match.
+    ['Contact: jane@acme.c…[truncated]', 'Contact: ***@acme.c…[truncated]'],
+    ['Contact: jane%40acm…[truncated]', 'Contact: ***%40acm…[truncated]'],
+    ["Contact: o'bri…[truncated]", 'Contact: ***…[truncated]'],
+    // An address the cut left whole, and an already masked tail, stay as they are.
+    ['Contact: jane@acme.co…[truncated]', 'Contact: ***@acme.co…[truncated]'],
+    ['Contact: ***@acme.c…[truncated]', 'Contact: ***@acme.c…[truncated]'],
+    ['Contact: ***…[truncated]', 'Contact: ***…[truncated]'],
+  ])('masks the address a cut string ends with: %j', (text, masked) => {
+    expect(maskEmails(text)).toBe(masked);
+    expect(maskEmails(masked)).toBe(masked);
+  });
+
+  it('leaves the last word of a string that was not cut alone', () => {
+    expect(maskEmails('Contact: jane.doe')).toBe('Contact: jane.doe');
+  });
+
+  it('runs in linear time on 16,000-character strings built to make a regex backtrack', () => {
+    const worst = [
+      'a'.repeat(16_000),
+      `${'a'.repeat(15_999)}@`,
+      `a@${'a.'.repeat(7_999)}`,
+      'a%40'.repeat(4_000),
+      `${'a.'.repeat(7_999)}@`,
+      `${"a'".repeat(7_999)}@`,
+      `${'é'.repeat(15_999)}@`,
+      `x@${`${'b'.repeat(63)}.`.repeat(249)}`,
+      'a@'.repeat(8_000),
+      `${'a'.repeat(15_988)}…[truncated]`,
+    ];
+    maskEmails('warm up jane@acme.com');
+    for (const text of worst) {
+      const started = performance.now();
+      maskEmails(text);
+      // About 1 ms each on a laptop; the previous pattern took 300-750 ms on
+      // several of these. The bound leaves room for a slow CI runner.
+      expect(performance.now() - started).toBeLessThan(50);
+    }
+  });
 });
 
 describe('emailRedactor and pageTextLimiter on exported spans', () => {
@@ -90,6 +149,31 @@ describe('emailRedactor and pageTextLimiter on exported spans', () => {
     expect(all).not.toMatch(/hello@|jane@|owner@/);
     // The app's value is untouched.
     expect(input.email).toBe('hello@firecrawl.dev');
+    await observability.shutdown();
+  });
+
+  it('mask an address that the string length cap cut in two', async () => {
+    const exporter = new CaptureExporter();
+    const observability = new Observability({
+      configs: {
+        test: {
+          serviceName: 'fire-enrich-test',
+          exporters: [exporter],
+          // Mastra cuts strings when the span records them, before the processors run.
+          serializationOptions: { maxStringLength: 40 },
+          spanOutputProcessors: [emailRedactor()],
+        },
+      },
+    });
+    const instance = observability.getInstance('test')!;
+    const prompt = `${'p'.repeat(33)} jane.doe@firecrawl.dev and more`;
+
+    const span = instance.startSpan({ type: SpanType.GENERIC, name: 'cut', input: { prompt } });
+    span.end();
+    await observability.flush();
+
+    expect(exporter.ended[0].input).toEqual({ prompt: `${'p'.repeat(33)} ***…[truncated]` });
+    expect(JSON.stringify(exporter.events.map((event) => event.exportedSpan))).not.toMatch(/jane|\.do/);
     await observability.shutdown();
   });
 

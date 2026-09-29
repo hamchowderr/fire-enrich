@@ -56,19 +56,79 @@ function rewriteSpan(span: AnySpan, rewrite: Rewrite): void {
   }
 }
 
-/**
- * An address's local part, `@` (or its URL encoding `%40`), then its domain.
- * The local part never contains `*`, so a masked address does not match again.
- */
-const EMAIL = /[A-Za-z0-9._%+-]+(@|%40)((?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63})/g;
+/** A character of a local part: any letter, combining mark or digit, and `.`, `_`, `%`, `+`, `-`. */
+const LOCAL_CHAR = String.raw`[\p{L}\p{M}\p{N}._%+\-]`;
+
+/** A character of a domain label: any letter, combining mark or digit. */
+const LABEL_CHAR = String.raw`[\p{L}\p{M}\p{N}]`;
 
 /**
- * `hello@firecrawl.dev` → `***@firecrawl.dev`.
+ * An address's local part, `@` (or its URL encoding `%40`), then its domain.
+ *
+ * - Unicode (`u` flag): `josé@acme.com` and `jürgen@bücher.de` match. An
+ *   apostrophe (`'` or `’`) counts when it sits between two local-part
+ *   characters, so `o'brien@acme.com` is masked whole.
+ * - Linear time. A match starts only where a run of local-part characters
+ *   starts (the lookbehind rejects every other position at once), so each run
+ *   is read once, forwards and back, however long it is; the domain's
+ *   quantifiers are bounded (a label is at most 63 characters, a domain at most
+ *   127 labels). The previous, unanchored pattern re-read the run from every
+ *   position in it, which took 300-750 ms on a 16,000-character string.
+ * - A run is masked whole, even past the 64 characters a local part may have.
+ * - The local part never contains `*`, so a masked address does not match again.
+ */
+const EMAIL = new RegExp(
+  String.raw`(?<!${LOCAL_CHAR}|${LOCAL_CHAR}['’])(?:${LOCAL_CHAR}|(?<=${LOCAL_CHAR})['’](?=${LOCAL_CHAR}))+(@|%40)` +
+    String.raw`((?:${LABEL_CHAR}(?:[\p{L}\p{M}\p{N}\-]{0,61}${LABEL_CHAR})?\.){1,127}\p{L}{2,63})`,
+  'gu'
+);
+
+/**
+ * The end Mastra's serializer puts on a string it cut to
+ * `serializationOptions.maxStringLength` (`truncateString` in
+ * `@mastra/observability`). The cut happens when the span records the value,
+ * before any span output processor runs, so an address can be split by it.
+ */
+const TRUNCATED = '…[truncated]';
+
+/**
+ * The last word before a cut: local-part characters, apostrophes and `@`, at
+ * most as long as a whole address. `*` is not in it, so a masked tail is left
+ * alone on the next export.
+ */
+const CUT_TAIL = /[\p{L}\p{M}\p{N}._%+\-'’@]+$/u;
+
+/** The longest address: a 64-character local part, `%40` and a 253-character domain. */
+const MAX_ADDRESS = 64 + 3 + 253;
+
+/**
+ * Masks the word a cut string ends with, which may be the start of an address
+ * whose `@` or domain was cut off (`… jane.do…[truncated]`). What precedes the
+ * first `@` or `%40` of that word is masked; a word without one is masked whole,
+ * since the cut may have fallen before its `@`. An address the cut left whole,
+ * or one already masked, is not changed here.
+ */
+function maskCutTail(text: string): string {
+  if (!text.endsWith(TRUNCATED)) return text;
+  const head = text.slice(0, -TRUNCATED.length);
+  const tail = head.slice(-MAX_ADDRESS).match(CUT_TAIL)?.[0];
+  if (!tail) return text;
+
+  const at = tail.search(/@|%40/);
+  const local = at === -1 ? tail : tail.slice(0, at);
+  if (!local) return text;
+  return `${head.slice(0, head.length - tail.length)}***${tail.slice(local.length)}${TRUNCATED}`;
+}
+
+/**
+ * `hello@firecrawl.dev` → `***@firecrawl.dev`, and the last word of a string
+ * Mastra cut is masked the same way (see {@link maskCutTail}).
  *
  * @public Tests check the pattern with it.
  */
 export function maskEmails(text: string): string {
-  return text.includes('@') || text.includes('%40') ? text.replace(EMAIL, '***$1$2') : text;
+  const masked = text.includes('@') || text.includes('%40') ? text.replace(EMAIL, '***$1$2') : text;
+  return maskCutTail(masked);
 }
 
 /**
