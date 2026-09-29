@@ -160,7 +160,8 @@ With tracing on (the default), each enrichment row is a trace: the `enrichRow` w
 
 **What a span stores.** Its input and output: the prompts (which contain the row's email address and the chat panel's table), tool arguments and results (page text), the workflow's input (the row's other columns) and output (the enriched values), plus metadata and attributes (model, tokens, timings). Before a span is stored:
 
-- Email addresses are masked to `***@domain` everywhere in the span, including addresses printed on the pages the tools read. The domain is kept because it names the company the row is about.
+- Email addresses are masked to `***@domain` in every string and object key of the span, including addresses printed on the pages the tools read. The domain is kept because it names the company the row is about. The pattern matches a local part of letters in any script, digits, `. _ % + -` and inner apostrophes (`o'brien`), then `@` or `%40` and a domain with a dot. Text that does not have that form is not masked: an address with other characters in its local part (such as `!` or `/`), a quoted local part, or one written as `jane at acme dot com`.
+- When Mastra cuts a string longer than 16,000 characters (it ends `…[truncated]`), the last word before the cut is masked as well, since the cut can fall inside an address.
 - Keys such as `apiKey`, `token` and `password` are redacted by Mastra's default `SensitiveDataFilter`.
 - Page text from `firecrawl-search` and `firecrawl-scrape` is cut to 2,000 characters per page, and any other string to 16,000 characters.
 
@@ -175,7 +176,7 @@ Workflow run snapshots (`mastra_workflow_snapshot`, written by Mastra for every 
 **Viewing traces.** Run Studio with the database you want to read and open Observability, then Traces:
 
 - Local: `npm run studio`. With no `TURSO_*` values it reads `.mastra/fire-enrich.db`, the file `npm run dev` writes.
-- Production: put the production `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in a separate file, for example `.env.traces.local` (git ignores `.env*.local`), with `TRACING=0` in it, and run `npx mastra dev --dir lib/mastra --env .env.traces.local`. With `--env`, Studio reads only that file. `TRACING=0` keeps what you do in Studio from writing new spans to production. Do not put production values in `.env.local`: `npm run dev`, `npm run studio` without `--env` and the database scripts read it, and local runs create tables at first use.
+- Production: put the production `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in a separate file, for example `.env.traces.local` (git ignores `.env*.local`), with `TRACING=0` in it, and run `npx mastra dev --dir lib/mastra --env .env.traces.local`. With `--env`, Studio reads only that file, and only if it exists: if the path is wrong, it reads `.env`, `.env.local` and `.env.development` instead, and says nothing about it. Check that the file is there before you start Studio. `TRACING=0` keeps what you do in Studio from writing new spans to production. Do not put production values in `.env.local`: `npm run dev`, `npm run studio` without `--env` and the database scripts read it, and local runs create tables at first use.
 
 The build, test and lint commands, the test harness, and the rules for database schema changes are in [CLAUDE.md](CLAUDE.md). `npm run check` runs what CI runs.
 
