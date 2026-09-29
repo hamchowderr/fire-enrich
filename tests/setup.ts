@@ -32,6 +32,13 @@ process.env.AIMOCK_URL ??= 'http://127.0.0.1:4010';
 if (process.env.EVIDENCE_LIVE === '1' && process.env.AI_GATEWAY_API_KEY) {
   process.env.EVIDENCE_LIVE_GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY;
 }
+// The opt-in live enrichment run (tests/evidence/enrich-structured-output.live.test.ts,
+// ENRICH_LIVE=1) does the same for the gateway and Firecrawl keys; that file
+// wraps both clients to count and cap calls.
+if (process.env.ENRICH_LIVE === '1') {
+  if (process.env.AI_GATEWAY_API_KEY) process.env.ENRICH_LIVE_GATEWAY_KEY = process.env.AI_GATEWAY_API_KEY;
+  if (process.env.FIRECRAWL_API_KEY) process.env.ENRICH_LIVE_FIRECRAWL_KEY = process.env.FIRECRAWL_API_KEY;
+}
 process.env.AI_GATEWAY_API_KEY = 'stub';
 process.env.FIRECRAWL_API_KEY = 'stub';
 process.env.MASTRA_TELEMETRY_DISABLED = '1';
