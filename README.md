@@ -65,6 +65,7 @@ Do not point a local `.env.local` at the production Turso database: local runs c
 | `TRACING` | on | `0`, `false`, `off`, `no` or `disabled` turns tracing off. On, workflow runs, agent and tool calls and evidence-support checks are recorded as trace spans in the Turso database (or the local file). See [Traces](#traces). |
 | `TRACING_SAMPLE_RATE` | `1` | Share of traces kept, from 0 to 1. Each trace is kept or dropped whole. |
 | `TRACING_RETENTION_DAYS` | `14` | Days a trace span is kept before it is deleted. `0` keeps spans forever. |
+| `WORKFLOW_SNAPSHOT_RETENTION_DAYS` | `14` | Days a workflow run snapshot is kept after the run's last activity. `0` keeps snapshots forever. Separate from `TRACING_RETENTION_DAYS`: snapshots are written with tracing on or off. See [Traces](#traces). |
 | `DEFAULT_PROFILE_ID` | newest profile | Business profile the planner uses when a request names none. Profiles are created with `POST /api/profiles`. With no profiles, the planner uses a generic one. |
 | `LIBSQL_PREVIEW_MIGRATE` | unset | `1` also creates the app's Turso tables on Vercel Preview builds. Set it only when Preview uses a different Turso database from Production. |
 | `UPSTASH_REDIS_REST_URL` | unset | With `UPSTASH_REDIS_REST_TOKEN`, limits each IP to 50 `/api/scrape` requests a day. Unset: no rate limiting. |
@@ -172,7 +173,7 @@ Other values in a row, such as names or phone numbers, are stored as they are.
 
 **Size.** Estimated from the tool budgets (a scrape returns up to 40,000 characters of page text, a search up to 8,000) and a one-row trace on the test fixtures: a typical row, with the identify step and three research groups making about ten searches and three scrapes, stores about 180,000 characters of span data, against about 300,000 without the page-text cut. A row that spends every step on a full-page scrape stores about 260,000 against 1.5 million; one that spends every step on searches, about 450,000 either way. The levers are `TRACING_SAMPLE_RATE`, `TRACING_RETENTION_DAYS` and `TRACING=0`.
 
-Workflow run snapshots (`mastra_workflow_snapshot`, written by Mastra for every run whether or not tracing is on) also hold each row's input, including its email address, and are not pruned.
+**Workflow run snapshots.** Mastra writes one row to `mastra_workflow_snapshot` for every `enrichRow` run, whether or not tracing is on. It holds the run's input (the row's email address, the plan and the fields) and each step's result, unmasked. The app does not read a snapshot after its run ends: `enrichRow` never suspends, and the run history in Dolt is written from the workflow's result. Studio's list of workflow runs reads this table. The same prune deletes snapshots whose last activity is older than `WORKFLOW_SNAPSHOT_RETENTION_DAYS` (default 14), at most 5,000 at a time. A deleted run is gone from Studio's run list; its trace stays until `TRACING_RETENTION_DAYS` removes it.
 
 **Viewing traces.** Run Studio with the database you want to read and open Observability, then Traces:
 

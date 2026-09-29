@@ -60,7 +60,7 @@ const MAX_TRACED_STRING = 16_000;
 /** Values of `TRACING` that turn it off, compared trimmed and lower-cased. */
 const OFF_VALUES = new Set(['0', 'false', 'off', 'no', 'disabled']);
 
-interface TracingConfig {
+export interface TracingConfig {
   enabled: boolean;
   sampleRate: number;
   /** Days a span is kept; 0 keeps spans forever. */

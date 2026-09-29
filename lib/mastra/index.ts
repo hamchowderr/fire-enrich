@@ -10,7 +10,8 @@ import { plannerAgent } from './agents/planner';
 import { researchAgent } from './agents/research';
 import { evidenceSupportClassifier } from './evidence-support';
 import { configureAIMock } from './lib/aimock';
-import { createObservability, tracingConfig, tracingRetention } from './tracing';
+import { storageRetention } from './retention';
+import { createObservability, tracingConfig } from './tracing';
 import { enrichRowWorkflow } from './workflows/enrich-row';
 
 // Route OpenAI-compatible clients at AIMock when `USE_AIMOCK=true`. Runs before
@@ -38,13 +39,14 @@ function createMastra() {
      * both. The local file is only resolved on the fallback path, so a
      * deployment using Turso never touches the filesystem.
      *
-     * `retention` expires trace spans after `TRACING_RETENTION_DAYS` (default
-     * 14) when `lib/flush-traces.ts` calls `prune()`; nothing else is pruned.
+     * `retention` expires trace spans after `TRACING_RETENTION_DAYS` and
+     * workflow run snapshots after `WORKFLOW_SNAPSHOT_RETENTION_DAYS` (both
+     * default 14) when `lib/flush-traces.ts` calls `prune()`; see retention.ts.
      */
     storage: new LibSQLStore({
       id: 'fire-enrich-storage',
       ...libsqlConnection(),
-      retention: tracingRetention(tracing),
+      retention: storageRetention(tracing),
     }),
     /**
      * Traces of workflow runs, agent and tool calls and evidence-support checks,
