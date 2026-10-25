@@ -243,6 +243,7 @@ that file, if it exists; a missing file silently falls back to `.env`, `.env.loc
 
 ## Conventions & Patterns
 
+- Sign-in: `middleware.ts` (Node.js runtime) requires a Better Auth session on every page and API route except `/sign-in` and `/api/auth/*`. Codes are emailed (FluentCRM, then Resend, then the dev log) to `AUTH_ALLOWED_EMAILS` only. Better Auth's `auth_*` tables are in `lib/app-db-schema.mjs`, as its migration generator writes them; regenerate and compare when upgrading `better-auth`. `AUTH_DISABLED=1` works off Vercel only. Route tests call handlers directly and skip the middleware; `tests/unit/auth.test.ts` covers it.
 - Business profiles and saved plans live in the libSQL database (Turso, or the local file), the same one Mastra's store uses, in tables of their own (`lib/app-db-schema.mjs`). They need no Dolt. A run in Dolt names its plan by `plan_id`, a plain value.
 - Dolt is optional: it enables versioned run history and run-to-run diffs. Setup for local dev and a VPS (`docker-compose.dolt.yml`, TLS, Vercel env): `docs/dolt-setup.md`.
 - The Fire Enrich Board artifact is built and republished by the braynee `board` skill (`/braynee:board`); the repo has no board script of its own.

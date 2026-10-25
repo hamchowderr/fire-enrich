@@ -62,6 +62,9 @@ export default defineConfig({
       // AIMock cannot serve the evidence check's evaluation model; pinned off
       // so a shell that turns it on cannot send a call to the gateway.
       EVIDENCE_CHECK: '0',
+      // The smoke covers enrichment, not sign-in, which tests/unit/auth.test.ts
+      // covers; off Vercel this flag lets every request through.
+      AUTH_DISABLED: '1',
       FIRECRAWL_API_KEY: 'stub',
       TURSO_DATABASE_URL: 'file:./.mastra/e2e.db',
       TURSO_AUTH_TOKEN: '',
