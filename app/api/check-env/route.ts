@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { allowedEmails, authDisabled, codeSender } from '@/lib/auth/config';
 import { doltConfigState } from '@/lib/dolt-config.mjs';
 import { gatewayConfigured } from '@/lib/gateway-auth';
 import { tursoConfig } from '@/lib/libsql-url.mjs';
@@ -55,5 +56,18 @@ export async function GET() {
     },
   };
 
-  return NextResponse.json({ environmentStatus, turso: database, optional });
+  // Sign-in (`lib/auth`): whether it is on, whether any address may sign in,
+  // and whether codes can be sent. A count, never the addresses.
+  const sender = codeSender();
+  const auth = {
+    required: !authDisabled(),
+    allowedEmails: allowedEmails().size,
+    codeSender: sender,
+    missing: [
+      ...(allowedEmails().size === 0 ? ['AUTH_ALLOWED_EMAILS'] : []),
+      ...(sender === null ? ['FLUENTCRM_URL and FLUENTCRM_AUTH, or RESEND_API_KEY and AUTH_EMAIL_FROM'] : []),
+    ],
+  };
+
+  return NextResponse.json({ environmentStatus, turso: database, optional, auth });
 }

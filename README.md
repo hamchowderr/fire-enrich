@@ -55,6 +55,23 @@ The Turso integration on the Vercel Marketplace sets `TURSO_DATABASE_URL` and `T
 
 Do not point a local `.env.local` at the production Turso database: local runs create the app's tables on first use.
 
+### Sign-in
+
+Every page and API route needs a signed-in user (`middleware.ts`, `lib/auth`), so nobody else can spend a deployment's Firecrawl and AI Gateway credits. Sign-in is [Better Auth](https://www.better-auth.com/) with a 6-digit code sent by email, and no passwords. Only the addresses in `AUTH_ALLOWED_EMAILS` get a code; the sign-in page answers the same for any address. Its tables (`auth_*`) live in the Turso database next to profiles and plans, and the production build creates them.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AUTH_ALLOWED_EMAILS` | unset | Addresses that may sign in, comma or space separated. Unset: nobody can sign in. Removing an address signs it out on its next request. |
+| `RESEND_API_KEY` | unset | With `AUTH_EMAIL_FROM`, sends sign-in codes through [Resend](https://resend.com/). |
+| `AUTH_EMAIL_FROM` | unset | Sender of the codes, for example `Fire Enrich <signin@example.com>`, on a domain verified in Resend. |
+| `FLUENTCRM_URL` | unset | With `FLUENTCRM_AUTH`, sends sign-in codes through FluentCRM's "send email to contact" on this WordPress site (for example `https://crm.example.com`). Used before Resend when both are set. A missing contact is added as transactional. |
+| `FLUENTCRM_AUTH` | unset | `user:application-password` of a WordPress user who can manage FluentCRM. |
+| `BETTER_AUTH_SECRET` | derived | Signs session cookies. Unset: derived from `TURSO_AUTH_TOKEN`, so rotating that token signs everyone out. Required on Vercel when there is no Turso token. |
+| `BETTER_AUTH_URL` | request host | The site's URL. Needed only for a custom domain or a host behind a proxy; `*.vercel.app` and localhost hosts are recognised. |
+| `AUTH_DISABLED` | unset | `1` turns sign-in off, outside Vercel only (local development, the Playwright smoke). Ignored on Vercel. |
+
+On Vercel, set `AUTH_ALLOWED_EMAILS` and one code sender. Locally, with no sender set, the code is printed in the `next dev` output. `GET /api/check-env` reports what is missing under `auth`.
+
 ### Optional
 
 | Variable | Default | Description |
@@ -116,17 +133,17 @@ Set by `tests/setup.ts`, the npm scripts or CI. A real run never needs them.
 
 ## Deploy with Vercel
 
-A deployment needs a Firecrawl API key and a Turso database. The Turso database holds business profiles, saved research plans and Mastra's workflow state. The AI Gateway needs no key on Vercel: the deployment's OIDC token authenticates it. Dolt (run history) is optional, and neither button asks for it.
+A deployment needs a Firecrawl API key, a Turso database, and the [sign-in](#sign-in) settings: the addresses that may sign in and a way to email codes (Resend, or FluentCRM). The Turso database holds business profiles, saved research plans and Mastra's workflow state. The AI Gateway needs no key on Vercel: the deployment's OIDC token authenticates it. Dolt (run history) is optional, and neither button asks for it.
 
 The two buttons differ only in where the Turso database comes from.
 
-**Turso from the Vercel Marketplace.** The Turso Cloud integration creates a database, or connects one it already manages in your Vercel team, and sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` on the project. The button asks for `FIRECRAWL_API_KEY` only. If the connection is given a custom prefix, the integration sets `<PREFIX>_TURSO_DATABASE_URL` and `<PREFIX>_TURSO_AUTH_TOKEN`, and the app reads that pair too.
+**Turso from the Vercel Marketplace.** The Turso Cloud integration creates a database, or connects one it already manages in your Vercel team, and sets `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` on the project. The button asks for `FIRECRAWL_API_KEY` and the [sign-in](#sign-in) settings. If the connection is given a custom prefix, the integration sets `<PREFIX>_TURSO_DATABASE_URL` and `<PREFIX>_TURSO_AUTH_TOKEN`, and the app reads that pair too.
 
-[![Deploy with Turso from Vercel Marketplace](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich&project-name=fire-enrich&repository-name=fire-enrich&env=FIRECRAWL_API_KEY&envDescription=Your%20Firecrawl%20API%20key.%20The%20Turso%20integration%20on%20this%20page%20provides%20the%20database.&envLink=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich%23deploy-with-vercel&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22tursocloud%22%2C%22productSlug%22%3A%22database%22%2C%22protocol%22%3A%22storage%22%2C%22allowConnectExistingProduct%22%3Atrue%7D%5D)
+[![Deploy with Turso from Vercel Marketplace](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich&project-name=fire-enrich&repository-name=fire-enrich&env=FIRECRAWL_API_KEY,AUTH_ALLOWED_EMAILS,RESEND_API_KEY,AUTH_EMAIL_FROM&envDescription=Your%20Firecrawl%20API%20key%2C%20the%20emails%20allowed%20to%20sign%20in%2C%20and%20a%20Resend%20key%20and%20sender%20for%20sign-in%20codes.%20The%20Turso%20integration%20on%20this%20page%20provides%20the%20database.&envLink=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich%23deploy-with-vercel&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22tursocloud%22%2C%22productSlug%22%3A%22database%22%2C%22protocol%22%3A%22storage%22%2C%22allowConnectExistingProduct%22%3Atrue%7D%5D)
 
-**Your own Turso database.** For a database in an existing Turso account. The button asks for `FIRECRAWL_API_KEY`, `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. `turso db show <database> --url` prints the url, and `turso db tokens create <database>` creates a token.
+**Your own Turso database.** For a database in an existing Turso account. The button asks for `FIRECRAWL_API_KEY`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` and the [sign-in](#sign-in) settings. `turso db show <database> --url` prints the url, and `turso db tokens create <database>` creates a token.
 
-[![Deploy with your own Turso database](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich&project-name=fire-enrich&repository-name=fire-enrich&env=FIRECRAWL_API_KEY,TURSO_DATABASE_URL,TURSO_AUTH_TOKEN&envDescription=Your%20Firecrawl%20API%20key%2C%20and%20the%20database%20url%20and%20auth%20token%20of%20your%20own%20Turso%20database.&envLink=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich%23deploy-with-vercel)
+[![Deploy with your own Turso database](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich&project-name=fire-enrich&repository-name=fire-enrich&env=FIRECRAWL_API_KEY,TURSO_DATABASE_URL,TURSO_AUTH_TOKEN,AUTH_ALLOWED_EMAILS,RESEND_API_KEY,AUTH_EMAIL_FROM&envDescription=Your%20Firecrawl%20API%20key%2C%20the%20database%20url%20and%20auth%20token%20of%20your%20own%20Turso%20database%2C%20the%20emails%20allowed%20to%20sign%20in%2C%20and%20a%20Resend%20key%20and%20sender%20for%20sign-in%20codes.&envLink=https%3A%2F%2Fgithub.com%2Fhamchowderr%2Ffire-enrich%23deploy-with-vercel)
 
 The production build creates the app's tables in the Turso database before the deployment serves traffic.
 
@@ -151,7 +168,7 @@ Requirements: Node.js 24 and npm.
    ```sh
    npm run dev
    ```
-5. Open [http://localhost:3000](http://localhost:3000). The upload page links a sample CSV (`public/sample-data.csv`).
+5. Open [http://localhost:3000](http://localhost:3000) and sign in: set `AUTH_ALLOWED_EMAILS` to your address, and the code appears in the `next dev` output (or set `AUTH_DISABLED=1`). The upload page links a sample CSV (`public/sample-data.csv`).
 
 `npm run studio` starts [Mastra Studio](https://mastra.ai/docs) on the agents and workflows in `lib/mastra`.
 

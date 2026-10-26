@@ -94,9 +94,9 @@ function ensureSchema(url: string, authToken: string | undefined): Promise<void>
  */
 function withMigrationHint(error: unknown): unknown {
   const message = error instanceof Error ? error.message : String(error);
-  if (!/no such table: (profiles|research_plans)/i.test(message)) return error;
+  if (!/no such table: (profiles|research_plans|auth_\w+)/i.test(message)) return error;
   return new Error(
-    `${message}. The profile and plan tables are missing from this libSQL database: ` +
+    `${message}. The app's tables are missing from this libSQL database: ` +
       "run `npm run db:migrate:libsql` with this deployment's TURSO_* variables.",
     { cause: error }
   );

@@ -205,9 +205,10 @@ describe('vercel-build main()', { timeout: 30_000 }, () => {
     expect(first.status).toBe(0);
     expect(first.stdout).toContain(BUILT);
     expect(first.stdout).toContain('db:migrate:libsql: production build.');
-    expect(first.stdout).toContain('created index:idx_profiles_created_at');
+    expect(first.stdout).toMatch(/created .*index:idx_profiles_created_at/);
     expect(first.stdout).toContain('table:profiles');
     expect(first.stdout).toContain('table:research_plans');
+    expect(first.stdout).toContain('table:auth_session');
 
     const second = build(turso);
     expect(second.status).toBe(0);
