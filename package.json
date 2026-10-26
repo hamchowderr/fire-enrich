@@ -52,7 +52,7 @@
     "class-variance-authority": "^0.7.1",
     "classnames": "^2.5.1",
     "clsx": "^2.1.1",
-    "firecrawl": "^4.41.0",
+    "firecrawl": "^4.51.0",
     "framer-motion": "^12.23.16",
     "geist": "^1.5.1",
     "kysely": "0.29.7",
