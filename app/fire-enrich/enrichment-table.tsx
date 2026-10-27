@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { ChatPanel, ChatMessage } from "./chat-panel";
 import { RunChanges } from "./run-changes";
+import { CrmPush } from "./crm-push";
 import {
   Download,
   X,
@@ -782,6 +783,9 @@ export function EnrichmentTable({
                     <Download style={{ width: '14px', height: '14px' }} />
                     JSON
                   </button>
+                  {status !== "processing" && (
+                    <CrmPush rows={rows} fields={fields} emailColumn={emailColumn} results={results} />
+                  )}
                 </>
               )}
 
