@@ -11,6 +11,7 @@ import {
 import { Upload, Download, AtSign, InfinityIcon } from "lucide-react";
 import Button from "@/components/shared/button/button";
 import Link from "next/link";
+import { CrmImport } from "./crm-import";
 
 interface CSVUploaderProps {
   onUpload: (rows: CSVRow[], columns: string[]) => void;
@@ -144,6 +145,8 @@ export function CSVUploader({ onUpload }: CSVUploaderProps) {
           )}
         </div>
       </div>
+
+      <CrmImport onLoad={onUpload} />
 
       {error && (
         <div className="mt-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl animate-fade-in shadow-sm">

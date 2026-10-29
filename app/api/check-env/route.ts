@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { allowedEmails, authDisabled, codeSender } from '@/lib/auth/config';
 import { doltConfigState } from '@/lib/dolt-config.mjs';
 import { gatewayConfigured } from '@/lib/gateway-auth';
+import { fluentCrmConfig } from '@/lib/crm/fluentcrm';
 import { tursoConfig } from '@/lib/libsql-url.mjs';
 
 /**
@@ -53,6 +54,11 @@ export async function GET() {
       // Variable names only, never values.
       missing: dolt.state === 'misconfigured' ? dolt.missing : [],
       enables: ['versioned run history', 'run diffs'],
+    },
+    fluentcrm: {
+      required: false,
+      configured: fluentCrmConfig() !== null,
+      enables: ['contact pull from lists and tags', 'push of enriched values to contact custom fields'],
     },
   };
 
