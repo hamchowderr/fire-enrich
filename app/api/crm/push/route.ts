@@ -9,11 +9,13 @@ const pushSchema = z.object({
   fields: z.array(z.object({ name: z.string().min(1), displayName: z.string().min(1) })).min(1),
   rows: z.array(z.object({ email: z.string().email(), values: z.record(z.string(), z.unknown()) })).max(1000),
   dryRun: z.boolean().optional(),
+  createFields: z.boolean().optional(),
 });
 
 /**
  * `POST /api/crm/push` → write enriched values to the contacts' custom fields
  * (`lib/crm/sync.ts`). With `dryRun`, only the field mapping, nothing written.
+ * With `createFields`, first add a custom field for each unmatched field.
  */
 export async function POST(request: NextRequest) {
   const crm = fluentCrm();
@@ -23,13 +25,13 @@ export async function POST(request: NextRequest) {
   const parsed = pushSchema.safeParse(body.value);
   if (!parsed.success) return badRequest(parsed.error, 'push');
   try {
-    const { fields, rows, dryRun } = parsed.data;
+    const { fields, rows, dryRun, createFields } = parsed.data;
     return NextResponse.json(
       await pushToCrm(
         crm,
         fields.map((f) => ({ name: f.name!, displayName: f.displayName! })),
         rows.map((r) => ({ email: r.email!, values: r.values ?? {} })),
-        { dryRun }
+        { dryRun, createFields }
       )
     );
   } catch (error) {

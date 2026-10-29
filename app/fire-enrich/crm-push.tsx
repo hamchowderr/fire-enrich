@@ -67,7 +67,7 @@ export function CrmPush({ rows, fields, emailColumn, results }: CrmPushProps) {
       return [{ email, values }];
     });
 
-  const call = async (dryRun: boolean): Promise<Summary> => {
+  const call = async (dryRun: boolean, createFields = false): Promise<Summary> => {
     const res = await fetch("/api/crm/push", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -75,6 +75,7 @@ export function CrmPush({ rows, fields, emailColumn, results }: CrmPushProps) {
         fields: fields.map((f) => ({ name: f.name, displayName: f.displayName })),
         rows: dryRun ? [] : pushRows(),
         dryRun,
+        createFields,
       }),
     });
     const data = await res.json();
@@ -92,6 +93,19 @@ export function CrmPush({ rows, fields, emailColumn, results }: CrmPushProps) {
       setPreview((await call(true)).mapping);
     } catch (e) {
       setError(e instanceof Error ? e.message : "FluentCRM push failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addFields = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setPreview((await call(true, true)).mapping);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add the fields");
     } finally {
       setBusy(false);
     }
@@ -151,16 +165,21 @@ export function CrmPush({ rows, fields, emailColumn, results }: CrmPushProps) {
               {preview.unmatched.length > 0 && (
                 <div>
                   <p className="font-medium mb-1">No custom field yet (skipped)</p>
-                  <p className="text-black-alpha-64 mb-1">
-                    Add these in FluentCRM under Settings → Custom Contact Fields, with this label and slug:
-                  </p>
-                  <ul className="list-disc pl-5">
+                  <ul className="list-disc pl-5 mb-2">
                     {preview.unmatched.map((m) => (
                       <li key={m.field}>
                         {m.label} <code>{m.slug}</code>
                       </li>
                     ))}
                   </ul>
+                  <Button
+                    variant="secondary"
+                    onClick={addFields}
+                    isLoading={busy}
+                    loadingLabel="Adding..."
+                  >
+                    Add {preview.unmatched.length} missing field{preview.unmatched.length === 1 ? "" : "s"} to FluentCRM
+                  </Button>
                 </div>
               )}
               <p>{count} completed row{count === 1 ? "" : "s"} to send.</p>
@@ -186,9 +205,9 @@ export function CrmPush({ rows, fields, emailColumn, results }: CrmPushProps) {
             ) : (
               <Button
                 onClick={send}
-                isLoading={busy && !!preview}
+                isLoading={busy && !!preview && preview.unmatched.length === 0}
                 loadingLabel="Sending..."
-                disabled={!preview || preview.mapped.length === 0 || count === 0}
+                disabled={busy || !preview || preview.mapped.length === 0 || count === 0}
               >
                 Send {count} contact{count === 1 ? "" : "s"}
               </Button>

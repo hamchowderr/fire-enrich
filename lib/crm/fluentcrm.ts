@@ -131,6 +131,26 @@ export class FluentCrm {
     return (await this.call<{ fields: CrmCustomField[] }>('GET', '/custom-fields/contacts')).fields;
   }
 
+  /**
+   * Add contact custom fields (text) to the site's definitions. FluentCRM saves
+   * the whole list at once, so this reads it, appends the new slugs and saves
+   * it back, then reads it again and fails if any field, old or new, is missing.
+   */
+  async addCustomFields(fields: { slug: string; label: string }[]): Promise<CrmCustomField[]> {
+    const current = await this.customFields();
+    const known = new Set(current.map((f) => f.slug));
+    const added = fields
+      .filter((f) => !known.has(f.slug))
+      .map((f) => ({ type: 'text', label: f.label, slug: f.slug, group: 'Fire Enrich' }));
+    if (added.length === 0) return current;
+    await this.call('PUT', '/custom-fields/contacts', { fields: [...current, ...added] });
+    const saved = await this.customFields();
+    const savedSlugs = new Set(saved.map((f) => f.slug));
+    const lost = [...current, ...added].filter((f) => !savedSlugs.has(f.slug)).map((f) => f.slug);
+    if (lost.length > 0) throw new Error(`FluentCRM did not keep custom fields: ${lost.join(', ')}`);
+    return saved;
+  }
+
   /** The contact with exactly this email, with its custom values, or null. Never creates one. */
   async findContact(email: string): Promise<CrmContact | null> {
     const res = await this.call<{ subscribers: { data: CrmContact[] } }>(

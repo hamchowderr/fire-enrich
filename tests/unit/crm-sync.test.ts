@@ -178,6 +178,39 @@ describe('push', () => {
     expect(summary.updated).toEqual(['ok@x.com']);
   });
 
+  it('creates missing fields, keeping the existing ones, when asked', async () => {
+    let saved = [{ slug: 'alt_emails', label: 'Alternate Emails', type: 'text', group: 'Identity' }];
+    const { crm, calls } = fakeCrm((method, path, body) => {
+      if (path === '/custom-fields/contacts' && method === 'PUT') {
+        saved = (body as { fields: typeof saved }).fields;
+        return { fields: saved };
+      }
+      if (path === '/custom-fields/contacts') return { fields: saved };
+      return {};
+    });
+    const summary = await pushToCrm(crm, FIELDS.slice(0, 1), [], { dryRun: true, createFields: true });
+    expect(summary.mapping.unmatched).toEqual([]);
+    expect(summary.mapping.mapped).toEqual([{ field: 'industry', slug: 'enrich_industry', label: 'Enrich: Industry' }]);
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+      fields: [
+        { slug: 'alt_emails', label: 'Alternate Emails', type: 'text', group: 'Identity' },
+        { type: 'text', label: 'Enrich: Industry', slug: 'enrich_industry', group: 'Fire Enrich' },
+      ],
+    });
+  });
+
+  it('fails when FluentCRM drops a field on save', async () => {
+    const { crm } = fakeCrm((method, path) => {
+      if (path === '/custom-fields/contacts' && method === 'GET') {
+        return { fields: [{ slug: 'alt_emails', label: 'Alternate Emails', type: 'text' }] };
+      }
+      return {};
+    });
+    await expect(crm.addCustomFields([{ slug: 'enrich_industry', label: 'Enrich: Industry' }])).rejects.toThrow(
+      'FluentCRM did not keep custom fields: enrich_industry'
+    );
+  });
+
   it('validates the push body', async () => {
     process.env.FLUENTCRM_URL = 'https://crm.example.com';
     process.env.FLUENTCRM_AUTH = 'u:p';

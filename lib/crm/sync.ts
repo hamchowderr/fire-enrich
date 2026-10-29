@@ -9,7 +9,8 @@
  * it: slug `enrich_<name>` (the name a new one should get), or a slug equal to
  * the field's name, or a label equal to its display name. A field with no
  * matching custom field is reported, with the slug and label to create, and
- * left out: the push never changes the site's field definitions. Only values
+ * left out, unless the caller asks to create the missing fields (the push
+ * dialog's "Add missing fields"); existing definitions are never changed. Only values
  * that differ from what the contact already holds are sent, an unknown value
  * never clears one, and an email with no contact is skipped, never added.
  */
@@ -104,14 +105,21 @@ export interface PushSummary {
 
 const CONCURRENCY = 4;
 
-/** Write the rows' values to their contacts. With `dryRun`, only work out the field mapping. */
+/**
+ * Write the rows' values to their contacts. With `dryRun`, only work out the
+ * field mapping. With `createFields`, first add a custom field for each
+ * unmatched field.
+ */
 export async function pushToCrm(
   crm: FluentCrm,
   fields: Pick<EnrichmentField, 'name' | 'displayName'>[],
   rows: PushRow[],
-  options: { dryRun?: boolean } = {}
+  options: { dryRun?: boolean; createFields?: boolean } = {}
 ): Promise<PushSummary> {
-  const mapping = mapFields(fields, await crm.customFields());
+  let mapping = mapFields(fields, await crm.customFields());
+  if (options.createFields && mapping.unmatched.length > 0) {
+    mapping = mapFields(fields, await crm.addCustomFields(mapping.unmatched));
+  }
   const summary: PushSummary = { mapping, updated: [], unchanged: [], notInCrm: [], failed: [] };
   if (options.dryRun || mapping.mapped.length === 0) return summary;
 

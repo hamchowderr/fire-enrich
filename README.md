@@ -77,7 +77,7 @@ On Vercel, set `AUTH_ALLOWED_EMAILS` and one code sender. Locally, with no sende
 With `FLUENTCRM_URL` and `FLUENTCRM_AUTH` set (the same pair that sends sign-in codes), the app works with the contacts on that FluentCRM site (`lib/crm`):
 
 - **Pull.** Under the CSV drop zone, "Or load contacts from FluentCRM" loads up to 1,000 contacts from a list, a tag, or all contacts as the table to enrich (email, name, company, phone, city and country).
-- **Push.** After a run, the "FluentCRM" button next to CSV and JSON writes each enriched value to the contact's custom field. A field is matched to the custom field with slug `enrich_<field name>`, or with the field's name as its slug, or with its display name as its label. Fields with no match are listed with the label and slug to add under Settings → Custom Contact Fields, and skipped: the push never changes the site's field definitions. Only values that differ are sent, an unknown value never clears one, and an email with no contact is skipped, never added.
+- **Push.** After a run, the "FluentCRM" button next to CSV and JSON writes each enriched value to the contact's custom field. A field is matched to the custom field with slug `enrich_<field name>`, or with the field's name as its slug, or with its display name as its label. Fields with no match are listed, and "Add missing fields to FluentCRM" creates them as text fields (label `Enrich: <display name>`, group Fire Enrich); existing field definitions are never changed. Only values that differ are sent, an unknown value never clears one, and an email with no contact is skipped, never added.
 
 The WordPress user behind `FLUENTCRM_AUTH` needs FluentCRM permission to read and update contacts. `GET /api/check-env` reports `optional.fluentcrm.configured`.
 
