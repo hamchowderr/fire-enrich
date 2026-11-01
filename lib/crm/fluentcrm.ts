@@ -160,6 +160,13 @@ export class FluentCrm {
     return res.subscribers.data.find((s) => s.email.toLowerCase() === email.toLowerCase()) ?? null;
   }
 
+  /**
+   * Add a note to a contact's profile (its Notes tab). `description` is HTML.
+   */
+  async addNote(id: number, note: { title: string; description: string }): Promise<void> {
+    await this.call('POST', `/subscribers/${id}/notes`, { note: { ...note, type: 'note' } });
+  }
+
   /** Set some custom field values on a contact. Values not named are left as they are. */
   async setCustomValues(id: number, values: Record<string, string>): Promise<void> {
     await this.call('PUT', `/subscribers/${id}`, { custom_values: values });
