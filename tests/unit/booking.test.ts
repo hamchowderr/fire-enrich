@@ -19,7 +19,7 @@ vi.mock('@/lib/mastra/enrich-adapter', () => ({
 }));
 
 import { POST } from '@/app/api/hooks/booking/route';
-import { BOOKING_FIELDS, briefHtml, hookSecretMatches, parseBooking, processBooking } from '@/lib/crm/booking';
+import { BOOKING_FIELDS, briefHtml, hookSecretMatches, parseBooking, processBooking, websiteDomain } from '@/lib/crm/booking';
 import { FluentCrm } from '@/lib/crm/fluentcrm';
 import type { EnrichmentResult } from '@/lib/types';
 
@@ -99,6 +99,22 @@ describe('parseBooking', () => {
   });
 });
 
+describe('websiteDomain', () => {
+  const withSite = (value: string, label = 'Website') => ({
+    ...parseBooking(BOOKING_BODY)!,
+    answers: [{ key: 'site', label, value }],
+  });
+  it('takes the host of the website answer, with or without a scheme', () => {
+    expect(websiteDomain(withSite('acme.test'))).toBe('acme.test');
+    expect(websiteDomain(withSite('http://www.acme.test/x'))).toBe('acme.test');
+    expect(websiteDomain(withSite('acme.test', 'Company URL'))).toBe('acme.test');
+  });
+  it('is null without a usable website answer', () => {
+    expect(websiteDomain(parseBooking(BOOKING_BODY)!)).toBeNull();
+    expect(websiteDomain(withSite('none'))).toBeNull();
+  });
+});
+
 describe('hookSecretMatches', () => {
   it('needs the configured secret, and refuses everything without one', () => {
     expect(hookSecretMatches('s3cret', 's3cret')).toBe(true);
@@ -118,7 +134,7 @@ describe('briefHtml', () => {
     expect(html).toContain('&lt;script&gt;');
     expect(html).toContain('<li>Industry: Consulting (<a href="https://acme.test/about">source</a>)</li>');
     expect(html).toContain('<li>Services: Builds, Audits</li>');
-    expect(html).toMatch(/Not found:<\/strong> Website, What They Do/);
+    expect(html).toMatch(/Not found:<\/strong> What They Do, Target Customers/);
   });
 });
 
@@ -151,6 +167,19 @@ describe('processBooking', () => {
     expect(outcome.status).toBe('skipped');
     const note = calls.find((c) => c.path === '/subscribers/7/notes');
     expect(JSON.stringify(note!.body)).toContain('Not researched');
+  });
+
+  it('researches a personal email from the website on the form', async () => {
+    const { crm } = fakeCrm([{ id: 7, email: 'dan@gmail.com' }]);
+    const research = vi.fn(async () => ({}));
+    const body = {
+      ...BOOKING_BODY,
+      email: 'dan@gmail.com',
+      custom_form_data: { website: { label: 'Website', type: 'text', value: 'https://www.Acme.test/about' } },
+    };
+    const outcome = await processBooking(parseBooking(body)!, crm, research);
+    expect(research).toHaveBeenCalledWith('contact@acme.test');
+    expect(outcome.status).toBe('researched');
   });
 
   it('still leaves a note when research fails', async () => {

@@ -11,9 +11,9 @@
  * The form answers are saved to `form_*` custom fields; the research covers
  * only what the form does not ask.
  *
- * Research starts from the email domain (the identify step), so a personal
- * address (gmail.com and the rest of the skip list) gets a note saying so
- * instead of a run.
+ * Research starts from the email domain (the identify step). For a personal
+ * address (gmail.com and the rest of the skip list) it starts from the website
+ * the form gave instead; with neither, the contact gets a note and no run.
  */
 import { timingSafeEqual } from 'node:crypto';
 
@@ -25,11 +25,10 @@ import { crmValue, pushToCrm } from './sync';
 
 /**
  * What the brief researches: only what the booking form does not ask (the form
- * already has company, role and company size). Fixed, so the plan is cached
+ * already has company, role, company size and website). Fixed, so the plan is cached
  * after the first booking.
  */
 export const BOOKING_FIELDS: EnrichmentField[] = [
-  { name: 'website', displayName: 'Website', description: 'The company website URL', type: 'string', required: false },
   {
     name: 'company_description',
     displayName: 'What They Do',
@@ -195,6 +194,23 @@ export function briefHtml(booking: Booking, findings: Record<string, EnrichmentR
   return parts.join('');
 }
 
+/**
+ * The domain of the website the booker gave on the form (an answer whose key
+ * or label names a website), without `www.`, or null.
+ * @public Exported for the tests.
+ */
+export function websiteDomain(booking: Booking): string | null {
+  const answer = booking.answers.find((a) => /web\s*site|url/i.test(`${a.key} ${a.label}`));
+  if (!answer) return null;
+  try {
+    const url = new URL(/^https?:\/\//i.test(answer.value) ? answer.value : `https://${answer.value.trim()}`);
+    const host = url.hostname.toLowerCase().replace(/^www\./, '');
+    return host.includes('.') ? host : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The custom field a form answer is saved to: slug `form_<key>`, label `Form: <label>`. */
 const formField = (a: { key: string; label: string }) => ({
   slug: `form_${a.key.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`,
@@ -230,8 +246,12 @@ export async function processBooking(booking: Booking, crm: FluentCrm, research:
     console.warn(`[BOOKING] form answers not saved: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  // Research starts from a domain: the work email's, or the website from the
+  // form when the email is a personal one.
   const skipList = await loadSkipList();
-  if (shouldSkipEmail(booking.email, skipList)) {
+  const site = websiteDomain(booking);
+  const target = !shouldSkipEmail(booking.email, skipList) ? booking.email : site ? `contact@${site}` : null;
+  if (!target) {
     const reason = `${getSkipReason(booking.email, skipList)} (${booking.email.split('@')[1]})`;
     await crm.addNote(contactId, { title, description: briefHtml(booking, null, reason) });
     return { contactId, status: 'skipped', found: [], missing: BOOKING_FIELDS.map((f) => f.name) };
@@ -239,7 +259,7 @@ export async function processBooking(booking: Booking, crm: FluentCrm, research:
 
   let findings: Record<string, EnrichmentResult> | null = null;
   try {
-    findings = await research(booking.email);
+    findings = await research(target);
   } catch (error) {
     console.warn(`[BOOKING] research failed: ${error instanceof Error ? error.message : String(error)}`);
   }
