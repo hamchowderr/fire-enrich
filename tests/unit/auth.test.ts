@@ -104,6 +104,11 @@ describe('sign-in and the middleware', () => {
     expect(passed(await through('/api/auth/get-session'))).toBe(true);
   });
 
+  it('leaves the webhooks open; each checks its own secret', async () => {
+    expect(passed(await through('/api/hooks/booking'))).toBe(true);
+    expect((await through('/api/hooksx')).status).toBe(401);
+  });
+
   it('sends a code only to an allowed address, answering the same either way', async () => {
     const other = await authPost('/email-otp/send-verification-otp', { email: 'stranger@example.com', type: 'sign-in' });
     expect(other.status).toBe(200);

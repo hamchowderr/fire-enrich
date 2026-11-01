@@ -5,7 +5,8 @@ import { sessionEmail } from '@/lib/auth';
 
 /**
  * Every page and API route needs a signed-in, allowed user (`lib/auth`),
- * except the sign-in page and Better Auth's own endpoints. A page redirects to
+ * except the sign-in page, Better Auth's own endpoints and the webhooks under
+ * `/api/hooks/` (which check a shared secret instead). A page redirects to
  * /sign-in; an API route answers 401, so the UI's fetches fail plainly.
  *
  * Runs on the Node.js runtime so the session is checked against the database
@@ -16,6 +17,9 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   if (pathname === '/sign-in' || pathname.startsWith('/api/auth/')) return NextResponse.next();
+  // Webhooks from other systems (the hub's booking webhook) carry no session;
+  // each hook route checks its own shared secret.
+  if (pathname.startsWith('/api/hooks/')) return NextResponse.next();
 
   if (await sessionEmail(request.headers)) return NextResponse.next();
 
