@@ -136,12 +136,12 @@ export class FluentCrm {
    * the whole list at once, so this reads it, appends the new slugs and saves
    * it back, then reads it again and fails if any field, old or new, is missing.
    */
-  async addCustomFields(fields: { slug: string; label: string }[]): Promise<CrmCustomField[]> {
+  async addCustomFields(fields: { slug: string; label: string }[], group = 'Fire Enrich'): Promise<CrmCustomField[]> {
     const current = await this.customFields();
     const known = new Set(current.map((f) => f.slug));
     const added = fields
       .filter((f) => !known.has(f.slug))
-      .map((f) => ({ type: 'text', label: f.label, slug: f.slug, group: 'Fire Enrich' }));
+      .map((f) => ({ type: 'text', label: f.label, slug: f.slug, group }));
     if (added.length === 0) return current;
     await this.call('PUT', '/custom-fields/contacts', { fields: [...current, ...added] });
     const saved = await this.customFields();

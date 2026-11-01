@@ -8,6 +8,9 @@
  * marketing opt-in) when there is none, because FluentBooking does not add
  * bookers to the CRM unless its own FluentCRM integration is set up.
  *
+ * The form answers are saved to `form_*` custom fields; the research covers
+ * only what the form does not ask.
+ *
  * Research starts from the email domain (the identify step), so a personal
  * address (gmail.com and the rest of the skip list) gets a note saying so
  * instead of a run.
@@ -20,9 +23,12 @@ import { getSkipReason, loadSkipList, shouldSkipEmail } from '@/lib/utils/skip-l
 import type { FluentCrm } from './fluentcrm';
 import { crmValue, pushToCrm } from './sync';
 
-/** What the brief researches. Fixed, so the plan is cached after the first booking. */
+/**
+ * What the brief researches: only what the booking form does not ask (the form
+ * already has company, role and company size). Fixed, so the plan is cached
+ * after the first booking.
+ */
 export const BOOKING_FIELDS: EnrichmentField[] = [
-  { name: 'company_name', displayName: 'Company', description: 'The company name', type: 'string', required: false },
   { name: 'website', displayName: 'Website', description: 'The company website URL', type: 'string', required: false },
   {
     name: 'company_description',
@@ -43,13 +49,6 @@ export const BOOKING_FIELDS: EnrichmentField[] = [
     name: 'target_customers',
     displayName: 'Target Customers',
     description: 'Who the company sells to: customer type, size or industry',
-    type: 'string',
-    required: false,
-  },
-  {
-    name: 'employee_count',
-    displayName: 'Employee Count',
-    description: 'How many people work at the company (a number or range)',
     type: 'string',
     required: false,
   },
@@ -82,8 +81,8 @@ export interface Booking {
   event?: string;
   startTime?: string;
   message?: string;
-  /** Booking form answers, label → value, in form order. */
-  answers: [string, string][];
+  /** Booking form answers, in form order. `key` is the form field's name. */
+  answers: { key: string; label: string; value: string }[];
 }
 
 type Obj = Record<string, unknown>;
@@ -113,12 +112,12 @@ export function parseBooking(body: unknown): Booking | null {
       .join(' ') ||
       email);
 
-  const answers: [string, string][] = [];
+  const answers: Booking['answers'] = [];
   const form = isObj(booking.custom_form_data) ? booking.custom_form_data : isObj(booking.custom_fields) ? booking.custom_fields : {};
   for (const [key, entry] of Object.entries(form)) {
     const label = isObj(entry) ? (text(entry.label) ?? key) : key;
     const value = isObj(entry) ? text(entry.value) : text(entry);
-    if (value) answers.push([label, value]);
+    if (value) answers.push({ key, label, value });
   }
 
   return {
@@ -165,7 +164,7 @@ export function briefHtml(booking: Booking, findings: Record<string, EnrichmentR
   if (booking.answers.length > 0) {
     parts.push(
       `<p><strong>Form answers</strong></p><ul>${booking.answers
-        .map(([label, value]) => `<li>${esc(label)}: ${esc(value)}</li>`)
+        .map(({ label, value }) => `<li>${esc(label)}: ${esc(value)}</li>`)
         .join('')}</ul>`
     );
   }
@@ -196,6 +195,27 @@ export function briefHtml(booking: Booking, findings: Record<string, EnrichmentR
   return parts.join('');
 }
 
+/** The custom field a form answer is saved to: slug `form_<key>`, label `Form: <label>`. */
+const formField = (a: { key: string; label: string }) => ({
+  slug: `form_${a.key.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`,
+  label: `Form: ${a.label}`,
+});
+
+/**
+ * Save the booking form answers to the contact as custom fields (group
+ * "Booking form"), adding the definitions that are missing, so the answers
+ * live on the contact and not only in the note.
+ */
+async function saveFormAnswers(crm: FluentCrm, contactId: number, booking: Booking): Promise<void> {
+  if (booking.answers.length === 0) return;
+  const fields = booking.answers.map(formField);
+  await crm.addCustomFields(fields, 'Booking form');
+  await crm.setCustomValues(
+    contactId,
+    Object.fromEntries(booking.answers.map((a) => [formField(a).slug, a.value]))
+  );
+}
+
 /**
  * Research the booker and write the result to their contact: the fields that
  * were found as custom fields (missing definitions are added, in the
@@ -204,6 +224,11 @@ export function briefHtml(booking: Booking, findings: Record<string, EnrichmentR
 export async function processBooking(booking: Booking, crm: FluentCrm, research: Research): Promise<BookingOutcome> {
   const contactId = await crm.contactId(booking.email);
   const title = `Pre-call brief: ${booking.name}`;
+  try {
+    await saveFormAnswers(crm, contactId, booking);
+  } catch (error) {
+    console.warn(`[BOOKING] form answers not saved: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   const skipList = await loadSkipList();
   if (shouldSkipEmail(booking.email, skipList)) {

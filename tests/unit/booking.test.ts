@@ -83,7 +83,7 @@ describe('parseBooking', () => {
       event: 'Free call meeting',
       startTime: '2026-11-09 17:00:00',
       message: 'Whole projects, not one-off tasks.',
-      answers: [['Company', 'Acme']],
+      answers: [{ key: 'company', label: 'Company', value: 'Acme' }],
     });
   });
 
@@ -118,7 +118,7 @@ describe('briefHtml', () => {
     expect(html).toContain('&lt;script&gt;');
     expect(html).toContain('<li>Industry: Consulting (<a href="https://acme.test/about">source</a>)</li>');
     expect(html).toContain('<li>Services: Builds, Audits</li>');
-    expect(html).toMatch(/Not found:<\/strong> Company, Website/);
+    expect(html).toMatch(/Not found:<\/strong> Website, What They Do/);
   });
 });
 
@@ -131,8 +131,14 @@ describe('processBooking', () => {
     expect(research).toHaveBeenCalledWith('dan@acme.test');
     expect(outcome).toMatchObject({ contactId: 99, status: 'researched', found: ['industry'] });
     expect(calls).toContainEqual({ method: 'POST', path: '/subscribers', body: { email: 'dan@acme.test', status: 'transactional' } });
-    const fieldsPut = calls.find((c) => c.method === 'PUT' && c.path === '/custom-fields/contacts');
-    expect((fieldsPut!.body as { fields: unknown[] }).fields).toHaveLength(BOOKING_FIELDS.length);
+    const fieldPuts = calls.filter((c) => c.method === 'PUT' && c.path === '/custom-fields/contacts');
+    // First the form answer's field, then the research fields on top of it.
+    expect((fieldPuts[0].body as { fields: { slug: string; group: string }[] }).fields).toEqual([
+      { type: 'text', label: 'Form: Company', slug: 'form_company', group: 'Booking form' },
+    ]);
+    expect((fieldPuts[1].body as { fields: unknown[] }).fields).toHaveLength(1 + BOOKING_FIELDS.length);
+    expect(calls).toContainEqual({ method: 'PUT', path: '/subscribers/99', body: { custom_values: { form_company: 'Acme' } } });
+    expect(BOOKING_FIELDS.map((f) => f.name)).not.toContain('company_name');
     const note = calls.find((c) => c.path === '/subscribers/99/notes');
     expect(note!.body).toMatchObject({ note: { title: 'Pre-call brief: Dan Condell', type: 'note' } });
   });
@@ -153,7 +159,8 @@ describe('processBooking', () => {
       throw new Error('boom');
     });
     expect(outcome.status).toBe('failed');
-    expect(calls.some((c) => c.path === '/custom-fields/contacts')).toBe(false);
+    // Only the form answer's field is added; nothing from research.
+    expect(calls.filter((c) => c.method === 'PUT' && c.path === '/custom-fields/contacts')).toHaveLength(1);
     expect(JSON.stringify(calls.find((c) => c.path === '/subscribers/7/notes')!.body)).toContain('Research failed');
   });
 });
